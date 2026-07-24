@@ -1,0 +1,17 @@
+{
+  "name": "dnse-trading-agents",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run start.ts",
+    "start:mcp": "bun run start.ts --mcp",
+    "start:agent": "bun run start.ts --agent",
+    "start:firecrawl": "bun run start.ts --firecrawl",
+    "start:docker": "bun run start.ts --docker"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.0.0"
+  }
+}

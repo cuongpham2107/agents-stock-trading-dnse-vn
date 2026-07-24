@@ -10,7 +10,7 @@
  *   bun run start.ts --docker     # Start all via Docker Compose
  */
 
-import { spawn, type ChildProcess } from "child_process";
+import { $ } from "bun";
 import { existsSync } from "fs";
 import { resolve } from "path";
 
@@ -40,33 +40,9 @@ function error(prefix: string, message: string) {
   console.error(`${colors.red}[${prefix}]${colors.reset} ${message}`);
 }
 
-// ==================== PROCESS MANAGEMENT ====================
-
-const processes: ChildProcess[] = [];
-
-function cleanup() {
-  log("SYSTEM", "Shutting down all services...", colors.yellow);
-  for (const proc of processes) {
-    if (proc.pid && !proc.killed) {
-      proc.kill("SIGTERM");
-    }
-  }
-  setTimeout(() => {
-    for (const proc of processes) {
-      if (proc.pid && !proc.killed) {
-        proc.kill("SIGKILL");
-      }
-    }
-    process.exit(0);
-  }, 2000);
-}
-
-process.on("SIGINT", cleanup);
-process.on("SIGTERM", cleanup);
-
 // ==================== SERVICE STARTERS ====================
 
-function startMCP(): ChildProcess {
+async function startMCP() {
   log("MCP", "Starting MCP Server...", colors.blue);
 
   if (!existsSync(resolve(MCP_DIR, "package.json"))) {
@@ -74,33 +50,40 @@ function startMCP(): ChildProcess {
     process.exit(1);
   }
 
-  const proc = spawn("bun", ["run", "start"], {
+  const proc = Bun.spawn(["bun", "run", "start"], {
     cwd: MCP_DIR,
-    stdio: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
     env: { ...process.env },
   });
 
-  proc.stdout?.on("data", (data) => {
-    log("MCP", data.toString().trim(), colors.blue);
-  });
+  // Read stdout
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
 
-  proc.stderr?.on("data", (data) => {
-    log("MCP", data.toString().trim(), colors.blue);
-  });
+  (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      log("MCP", decoder.decode(value).trim(), colors.blue);
+    }
+  })();
 
-  proc.on("error", (err) => {
-    error("MCP", `Failed to start: ${err.message}`);
-  });
+  // Read stderr
+  const stderrReader = proc.stderr.getReader();
+  (async () => {
+    while (true) {
+      const { done, value } = await stderrReader.read();
+      if (done) break;
+      log("MCP", decoder.decode(value).trim(), colors.blue);
+    }
+  })();
 
-  proc.on("exit", (code) => {
-    log("MCP", `Process exited with code ${code}`, colors.yellow);
-  });
-
-  processes.push(proc);
+  log("MCP", `Started with PID: ${proc.pid}`, colors.green);
   return proc;
 }
 
-function startAgent(): ChildProcess {
+async function startAgent() {
   log("AGENT", "Starting Agent...", colors.green);
 
   if (!existsSync(resolve(AGENT_DIR, "package.json"))) {
@@ -108,33 +91,40 @@ function startAgent(): ChildProcess {
     process.exit(1);
   }
 
-  const proc = spawn("bun", ["run", "start"], {
+  const proc = Bun.spawn(["bun", "run", "start"], {
     cwd: AGENT_DIR,
-    stdio: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
     env: { ...process.env },
   });
 
-  proc.stdout?.on("data", (data) => {
-    log("AGENT", data.toString().trim(), colors.green);
-  });
+  // Read stdout
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
 
-  proc.stderr?.on("data", (data) => {
-    log("AGENT", data.toString().trim(), colors.green);
-  });
+  (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      log("AGENT", decoder.decode(value).trim(), colors.green);
+    }
+  })();
 
-  proc.on("error", (err) => {
-    error("AGENT", `Failed to start: ${err.message}`);
-  });
+  // Read stderr
+  const stderrReader = proc.stderr.getReader();
+  (async () => {
+    while (true) {
+      const { done, value } = await stderrReader.read();
+      if (done) break;
+      log("AGENT", decoder.decode(value).trim(), colors.green);
+    }
+  })();
 
-  proc.on("exit", (code) => {
-    log("AGENT", `Process exited with code ${code}`, colors.yellow);
-  });
-
-  processes.push(proc);
+  log("AGENT", `Started with PID: ${proc.pid}`, colors.green);
   return proc;
 }
 
-function startFirecrawl(): ChildProcess {
+async function startFirecrawl() {
   log("FIRECRAWL", "Starting Firecrawl via Docker Compose...", colors.magenta);
 
   if (!existsSync(DOCKER_COMPOSE)) {
@@ -142,36 +132,15 @@ function startFirecrawl(): ChildProcess {
     process.exit(1);
   }
 
-  const proc = spawn("docker", ["compose", "up", "-d"], {
-    cwd: PROJECT_ROOT,
-    stdio: "pipe",
-  });
-
-  proc.stdout?.on("data", (data) => {
-    log("FIRECRAWL", data.toString().trim(), colors.magenta);
-  });
-
-  proc.stderr?.on("data", (data) => {
-    log("FIRECRAWL", data.toString().trim(), colors.magenta);
-  });
-
-  proc.on("error", (err) => {
-    error("FIRECRAWL", `Failed to start: ${err.message}`);
-  });
-
-  proc.on("exit", (code) => {
-    if (code === 0) {
-      log("FIRECRAWL", "Docker Compose started successfully!", colors.green);
-    } else {
-      error("FIRECRAWL", `Docker Compose exited with code ${code}`);
-    }
-  });
-
-  processes.push(proc);
-  return proc;
+  try {
+    await $`docker compose up -d`.cwd(PROJECT_ROOT);
+    log("FIRECRAWL", "Docker Compose started successfully!", colors.green);
+  } catch (e) {
+    error("FIRECRAWL", `Failed to start: ${e}`);
+  }
 }
 
-function startDockerAll(): ChildProcess {
+async function startDockerAll() {
   log("DOCKER", "Starting all services via Docker Compose...", colors.magenta);
 
   if (!existsSync(DOCKER_COMPOSE)) {
@@ -179,33 +148,12 @@ function startDockerAll(): ChildProcess {
     process.exit(1);
   }
 
-  const proc = spawn("docker", ["compose", "up", "-d", "--build"], {
-    cwd: PROJECT_ROOT,
-    stdio: "pipe",
-  });
-
-  proc.stdout?.on("data", (data) => {
-    log("DOCKER", data.toString().trim(), colors.magenta);
-  });
-
-  proc.stderr?.on("data", (data) => {
-    log("DOCKER", data.toString().trim(), colors.magenta);
-  });
-
-  proc.on("error", (err) => {
-    error("DOCKER", `Failed to start: ${err.message}`);
-  });
-
-  proc.on("exit", (code) => {
-    if (code === 0) {
-      log("DOCKER", "All services started!", colors.green);
-    } else {
-      error("DOCKER", `Docker Compose exited with code ${code}`);
-    }
-  });
-
-  processes.push(proc);
-  return proc;
+  try {
+    await $`docker compose up -d --build`.cwd(PROJECT_ROOT);
+    log("DOCKER", "All services started!", colors.green);
+  } catch (e) {
+    error("DOCKER", `Failed to start: ${e}`);
+  }
 }
 
 // ==================== MAIN ====================
@@ -247,35 +195,54 @@ async function main() {
 
   switch (flag) {
     case "--mcp":
-      startMCP();
+      await startMCP();
       break;
 
     case "--agent":
-      startAgent();
+      await startAgent();
       break;
 
     case "--firecrawl":
-      startFirecrawl();
+      await startFirecrawl();
       break;
 
     case "--docker":
-      startDockerAll();
+      await startDockerAll();
       break;
 
     default:
       // Start MCP + Agent
       log("SYSTEM", "Starting all services...", colors.cyan);
-      startMCP();
+      const mcpProc = await startMCP();
 
       // Wait 3s for MCP to initialize
-      setTimeout(() => {
-        startAgent();
-      }, 3000);
+      log("SYSTEM", "Waiting 3s for MCP to initialize...", colors.yellow);
+      await new Promise((r) => setTimeout(r, 3000));
+
+      const agentProc = await startAgent();
+
+      // Handle shutdown
+      process.on("SIGINT", () => {
+        log("SYSTEM", "Shutting down...", colors.yellow);
+        mcpProc.kill();
+        agentProc.kill();
+        process.exit(0);
+      });
+
+      process.on("SIGTERM", () => {
+        log("SYSTEM", "Shutting down...", colors.yellow);
+        mcpProc.kill();
+        agentProc.kill();
+        process.exit(0);
+      });
+
       break;
   }
 
-  // Keep process alive
-  await new Promise(() => {});
+  // Keep process alive for non-docker commands
+  if (flag !== "--firecrawl" && flag !== "--docker") {
+    await new Promise(() => {});
+  }
 }
 
 main();
