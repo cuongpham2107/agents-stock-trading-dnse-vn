@@ -4,14 +4,30 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run start.ts",
-    "start:mcp": "bun run start.ts --mcp",
-    "start:agent": "bun run start.ts --agent",
+    "start": "bun run src/index.ts",
+    "start:mcp": "bun run src/mcp/index.ts",
+    "start:agent": "bun run src/agent/index.ts",
+    "start:all": "bun run start.ts",
     "start:firecrawl": "bun run start.ts --firecrawl",
-    "start:docker": "bun run start.ts --docker"
+    "start:docker": "bun run start.ts --docker",
+    "dev": "bun --watch run src/index.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^1.5.1",
+    "@langchain/core": "^1.2.3",
+    "@langchain/google-genai": "^2.2.0",
+    "@langchain/langgraph": "^1.4.8",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
+    "@langchain/openai": "^1.5.5",
+    "@langchain/tavily": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "firecrawl": "^4.30.1",
+    "zod": "^4.4.3"
   }
 }

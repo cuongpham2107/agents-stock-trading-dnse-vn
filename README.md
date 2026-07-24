@@ -66,38 +66,26 @@ Hệ thống phân tích đầu tư chứng khoán Việt Nam với kiến trúc
 
 ```
 dnse/
-├── mcp/                          # MCP Server - 10 tools DNSE
-│   ├── src/
-│   │   ├── index.ts              # Entry point
-│   │   ├── server.ts             # HMAC signing, HTTP client
-│   │   └── tools/
-│   │       ├── close-price.ts    # get_close_price
-│   │       ├── instruments.ts    # get_instruments
-│   │       ├── secdef.ts         # get_secdef
-│   │       ├── ohlc.ts           # get_ohlc_history
-│   │       ├── trades.ts         # get_history_trades
-│   │       ├── latest-trades.ts  # get_latest_trades
-│   │       ├── latest-quotes.ts  # get_latest_quotes
-│   │       ├── working-dates.ts  # get_market_working_dates
-│   │       ├── foreign-trading.ts# get_foreign_trading
-│   │       └── trading-session.ts# get_trading_session
-│   └── package.json
-│
-├── agent/                        # TradingAgents - LangGraph.js
-│   ├── src/
-│   │   ├── agents/
-│   │   │   ├── analysts/         # 4 Analyst nodes
-│   │   │   │   ├── market-analyst.ts
-│   │   │   │   ├── sentiment-analyst.ts
-│   │   │   │   ├── news-analyst.ts
-│   │   │   │   └── fundamentals-analyst.ts
-│   │   │   ├── researchers/      # Bull/Bear researchers
-│   │   │   │   ├── bull-researcher.ts
-│   │   │   │   └── bear-researcher.ts
-│   │   │   ├── managers/         # Research Manager + Portfolio Manager
-│   │   │   │   ├── research-manager.ts
-│   │   │   │   └── portfolio-manager.ts
-│   │   │   ├── trader/           # Trader
+├── src/
+│   ├── index.ts                 # Entry point (chạy MCP hoặc Agent)
+│   ├── mcp/                     # MCP Server - 10 tools DNSE
+│   │   ├── index.ts             # MCP entry point
+│   │   ├── server.ts            # HMAC signing, HTTP client
+│   │   └── tools/               # 10 tools DNSE API
+│   │
+│   ├── agents/                  # TradingAgents - LangGraph.js
+│   │   ├── analysts/            # 4 Analyst nodes
+│   │   │   ├── market-analyst.ts
+│   │   │   ├── sentiment-analyst.ts
+│   │   │   ├── news-analyst.ts
+│   │   │   └── fundamentals-analyst.ts
+│   │   ├── researchers/         # Bull/Bear researchers
+│   │   │   ├── bull-researcher.ts
+│   │   │   └── bear-researcher.ts
+│   │   ├── managers/            # Research Manager + Portfolio Manager
+│   │   │   ├── research-manager.ts
+│   │   │   └── portfolio-manager.ts
+│   │   ├── trader/              # Trader
 │   │   │   │   └── trader.ts
 │   │   │   └── risk/             # Risk Team (3 analysts)
 │   │   │       └── risk-debate.ts
