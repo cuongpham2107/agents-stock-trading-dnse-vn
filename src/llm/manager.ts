@@ -61,7 +61,7 @@ export class LLMManager {
   switchQuickModel(presetName: string, apiKey?: string): void {
     const config = createConfigFromPreset(presetName, apiKey);
     this.quickLLM = createLLM(config, { temperature: 0.7 });
-    console.log(`[LLM Manager] Switched quick model to: ${presetName}`);
+    console.log(`[LLM Manager] Đã chuyển quick model: ${presetName}`);
   }
 
   /**
@@ -70,7 +70,7 @@ export class LLMManager {
   switchDeepModel(presetName: string, apiKey?: string): void {
     const config = createConfigFromPreset(presetName, apiKey);
     this.deepLLM = createLLM(config, { temperature: 0.3 });
-    console.log(`[LLM Manager] Switched deep model to: ${presetName}`);
+    console.log(`[LLM Manager] Đã chuyển deep model: ${presetName}`);
   }
 
   /**

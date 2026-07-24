@@ -31,18 +31,14 @@ async function setupCheckpoint() {
 // ==================== MAIN ====================
 
 async function main() {
-  console.log("Loading tools...");
+  console.log("Đang tải tools...");
 
-  // Tạo tools trực tiếp (không qua MCP)
   const allTools = createAllTools();
+  console.log(`Đã tải ${allTools.length} tools: ${allTools.map((t) => t.name).join(", ")}`);
 
-  console.log(`Loaded ${allTools.length} tools: ${allTools.map((t) => t.name).join(", ")}`);
-
-  // Setup checkpoint
   const checkpointer = await setupCheckpoint();
-  console.log("Checkpoint initialized.");
+  console.log("Đã khởi tạo checkpoint.");
 
-  // Hiển thị models đang dùng
   const currentModels = llmManager.getCurrentModels();
   console.log(`\n[LLM] Quick model: ${currentModels.quick}`);
   console.log(`[LLM] Deep model: ${currentModels.deep}`);
@@ -77,45 +73,41 @@ async function main() {
     const userInput = await askQuestion();
 
     if (userInput.toLowerCase() === "exit" || userInput.toLowerCase() === "quit") {
-      console.log("Goodbye!");
+      console.log("Tạm biệt!");
       break;
     }
 
     if (!userInput.trim()) continue;
 
-    // Parse command
     const parts = userInput.trim().split(/\s+/);
     const command = parts[0]?.toLowerCase();
 
-    // Switch quick model
     if (command === "switch" && parts[1]) {
       const modelName = parts.slice(1).join(" ");
       try {
         llmManager.switchQuickModel(modelName);
         const current = llmManager.getCurrentModels();
-        console.log(`\n[OK] Switched quick model to: ${current.quick}\n`);
+        console.log(`\n[OK] Đã chuyển quick model sang: ${current.quick}\n`);
       } catch (error) {
         console.log(`\n[Lỗi] Không thể switch model: ${error}\n`);
       }
       continue;
     }
 
-    // Switch deep model
     if (command === "switch-deep" && parts[1]) {
       const modelName = parts.slice(1).join(" ");
       try {
         llmManager.switchDeepModel(modelName);
         const current = llmManager.getCurrentModels();
-        console.log(`\n[OK] Switched deep model to: ${current.deep}\n`);
+        console.log(`\n[OK] Đã chuyển deep model sang: ${current.deep}\n`);
       } catch (error) {
         console.log(`\n[Lỗi] Không thể switch model: ${error}\n`);
       }
       continue;
     }
 
-    // List all models
     if (command === "models") {
-      console.log("\n=== AVAILABLE MODELS ===\n");
+      console.log("\n=== DANH SÁCH MODELS ===\n");
       const models = getAllModels();
       console.log("| Tên | Provider | Tier | Mô tả |");
       console.log("|-----|----------|------|-------|");
@@ -126,10 +118,9 @@ async function main() {
       continue;
     }
 
-    // List models by provider
     if (command === "models-provider" && parts[1]) {
       const provider = parts[1] as LLMProvider;
-      console.log(`\n=== MODELS FOR ${provider.toUpperCase()} ===\n`);
+      console.log(`\n=== MODELS CHO ${provider.toUpperCase()} ===\n`);
       const models = getModelsByProvider(provider);
       if (models.length === 0) {
         console.log("Không tìm thấy models cho provider này.");
@@ -144,7 +135,6 @@ async function main() {
       continue;
     }
 
-    // Show current models
     if (command === "current") {
       const current = llmManager.getCurrentModels();
       console.log(`\n[LLM] Quick model: ${current.quick}`);
@@ -152,7 +142,6 @@ async function main() {
       continue;
     }
 
-    // Check if it's an analyze command
     const analyzeMatch = userInput.match(/^analyze\s+(\w+)$/i);
     if (analyzeMatch && analyzeMatch[1]) {
       const ticker = analyzeMatch[1].toUpperCase();
@@ -176,7 +165,6 @@ async function main() {
         console.error(`\nLỗi khi phân tích: ${error}\n`);
       }
     } else {
-      // Regular chat mode
       const chatLlm = llmManager.getQuickLLM();
       const modelWithTools = (chatLlm as ChatOpenAI).bindTools(allTools);
       const chatHistory: (SystemMessage | HumanMessage | AIMessage | ToolMessage)[] = [];
@@ -190,7 +178,7 @@ async function main() {
           chatHistory.push(response);
 
           for (const toolCall of response.tool_calls) {
-            console.log(`\n[Calling tool: ${toolCall.name}]`);
+            console.log(`\n[Gọi tool: ${toolCall.name}]`);
 
             const tool = allTools.find((t) => t.name === toolCall.name);
             if (tool) {
@@ -199,7 +187,7 @@ async function main() {
                 : toolCall.args;
               const toolResult = await (tool as DynamicTool).invoke(args);
               const resultStr = typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
-              console.log(`[Tool result: ${resultStr.substring(0, 200)}...]`);
+              console.log(`[Kết quả: ${resultStr.substring(0, 200)}...]`);
               chatHistory.push(
                 new ToolMessage({
                   content: resultStr,
@@ -214,16 +202,16 @@ async function main() {
             typeof finalResponse.content === "string"
               ? finalResponse.content
               : JSON.stringify(finalResponse.content);
-          console.log(`\nAssistant: ${aiMessage}\n`);
+          console.log(`\nTrợ lý: ${aiMessage}\n`);
         } else {
           const aiMessage =
             typeof response.content === "string"
               ? response.content
               : JSON.stringify(response.content);
-          console.log(`\nAssistant: ${aiMessage}\n`);
+          console.log(`\nTrợ lý: ${aiMessage}\n`);
         }
       } catch (error) {
-        console.error(`\nError: ${error}\n`);
+        console.error(`\nLỗi: ${error}\n`);
       }
     }
   }

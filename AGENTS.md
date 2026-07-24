@@ -24,16 +24,26 @@ bun run tsc --noEmit     # Type check
 ```
 src/
 ├── index.ts              # Entry point - CLI chatbot
-├── tools/
-│   ├── dnse/server.ts    # Shared DNSE API client (HMAC auth)
-│   ├── market-data/      # 10 DNSE market data tools
-│   ├── trading/          # Placeholder - not implemented yet
-│   ├── account/          # Placeholder - not implemented yet
-│   └── web/              # Tavily + Firecrawl tools
+├── graph/
+│   ├── state.ts          # State annotations
+│   ├── trading-graph.ts  # Main graph
+│   ├── conditions.ts     # Conditional edges
+│   ├── fault-tolerance.ts # Retry + error handling
+│   ├── interrupts.ts     # Human-in-the-loop
+│   ├── stores.ts         # Shared state stores
+│   └── subgraphs/        # Subgraphs (analysts, debate, risk)
+├── checkpoint/
+│   ├── manager.ts        # SQLite checkpoint
+│   └── time-travel.ts    # Time-travel utilities
+├── memory/               # Decision logs
 ├── agents/               # Analysts, Researchers, Managers
-├── graph/trading-graph.ts # LangGraph state machine
-├── llm/                  # Multi-provider LLM (6 providers)
-├── memory/               # Decision logs + checkpoint
+├── tools/                # Direct tools (DynamicTool)
+│   ├── dnse/             # Shared DNSE server
+│   ├── market-data/      # 10 DNSE tools
+│   ├── trading/          # Placeholder
+│   ├── account/          # Placeholder
+│   └── web/              # Tavily + Firecrawl
+├── llm/                  # Multi-provider LLM
 └── prompts.ts            # System prompts
 ```
 
@@ -43,6 +53,15 @@ src/
 **LLM tiers:** `quick` (analysts, researchers) vs `deep` (research manager, portfolio manager)
 **Providers:** NVIDIA NIM, OpenAI, Anthropic, Google, Ollama, DeepSeek
 **Graph flow:** Analysts → Bull/Bear Debate → Research Manager → Trader → Risk Debate → Portfolio Manager
+
+## LangGraph Features
+
+- **Subgraphs:** Tách graph thành analysts, debate, risk subgraphs
+- **Persistence:** SQLite checkpoint, resume khi crash
+- **Time-travel:** Quay lại trạng thái bất kỳ
+- **Interrupts:** Dừng graph để user confirm
+- **Fault tolerance:** Retry + error handling tự động
+- **Stores:** Shared state cho multi-session
 
 ## Environment
 

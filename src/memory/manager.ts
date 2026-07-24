@@ -71,7 +71,7 @@ export class MemoryManager {
     state.lastUpdated = Date.now();
 
     this.saveState(ticker, state);
-    console.log(`[Memory] Stored decision for ${ticker} on ${tradeDate}`);
+    console.log(`[Memory] Đã lưu quyết định for ${ticker} on ${tradeDate}`);
   }
 
   /**
@@ -104,7 +104,7 @@ export class MemoryManager {
 
       state.lastUpdated = Date.now();
       this.saveState(ticker, state);
-      console.log(`[Memory] Updated outcome for ${ticker} on ${tradeDate}`);
+      console.log(`[Memory] Đã cập nhật kết quả for ${ticker} on ${tradeDate}`);
     }
   }
 
@@ -147,7 +147,7 @@ export class MemoryManager {
         this.states.set(ticker, state);
         return state;
       } catch (error) {
-        console.error(`[Memory] Error loading state for ${ticker}:`, error);
+        console.error(`[Memory] Lỗi khi tải state for ${ticker}:`, error);
       }
     }
 

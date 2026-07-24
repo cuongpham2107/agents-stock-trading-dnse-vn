@@ -67,7 +67,7 @@ const TradingStateAnnotation = Annotation.Root({
 function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   // Node: Market Analyst
   async function marketAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Market Analyst...");
+    console.log("[Graph] Đang chạy Market Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const result = await runMarketAnalyst(llm, snapshot);
@@ -80,7 +80,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Social/Sentiment Analyst
   async function socialAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Sentiment Analyst...");
+    console.log("[Graph] Đang chạy Sentiment Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const result = await runSocialAnalyst(llm, snapshot);
@@ -93,7 +93,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: News Analyst
   async function newsAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running News Analyst...");
+    console.log("[Graph] Đang chạy News Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const result = await runNewsAnalyst(llm, snapshot);
@@ -106,7 +106,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Fundamentals Analyst
   async function fundamentalsAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Fundamentals Analyst...");
+    console.log("[Graph] Đang chạy Fundamentals Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const result = await runFundamentalsAnalyst(llm, snapshot);
@@ -124,7 +124,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Bull Researcher
   async function bullResearcher(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Bull Researcher...");
+    console.log("[Graph] Đang chạy Bull Researcher...");
 
     const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
@@ -159,7 +159,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Bear Researcher
   async function bearResearcher(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Bear Researcher...");
+    console.log("[Graph] Đang chạy Bear Researcher...");
 
     const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
@@ -194,7 +194,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Research Manager
   async function researchManager(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Research Manager...");
+    console.log("[Graph] Đang chạy Research Manager...");
 
     const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
@@ -225,7 +225,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Trader
   async function trader(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Trader...");
+    console.log("[Graph] Đang chạy Trader...");
 
     const snapshot = state.dataSnapshot!;
 
@@ -250,7 +250,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Aggressive Risk Analyst
   async function aggressiveAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Aggressive Risk Analyst...");
+    console.log("[Graph] Đang chạy Aggressive Risk Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const riskState = state.riskDebateState;
@@ -274,7 +274,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Conservative Risk Analyst
   async function conservativeAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Conservative Risk Analyst...");
+    console.log("[Graph] Đang chạy Conservative Risk Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const riskState = state.riskDebateState;
@@ -298,7 +298,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Neutral Risk Analyst
   async function neutralAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Neutral Risk Analyst...");
+    console.log("[Graph] Đang chạy Neutral Risk Analyst...");
 
     const snapshot = state.dataSnapshot!;
     const riskState = state.riskDebateState;
@@ -322,7 +322,7 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
   // Node: Portfolio Manager
   async function portfolioManager(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Running Portfolio Manager...");
+    console.log("[Graph] Đang chạy Portfolio Manager...");
 
     const snapshot = state.dataSnapshot!;
     const riskState = state.riskDebateState;

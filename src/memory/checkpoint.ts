@@ -12,7 +12,7 @@ export class CheckpointManager {
 
   async initialize(): Promise<void> {
     this.checkpointer = await SqliteSaver.fromConnString(this.connString);
-    console.log("[Checkpoint] Initialized");
+    console.log("[Checkpoint] Đã khởi tạo");
   }
 
   getCheckpointer(): SqliteSaver {
