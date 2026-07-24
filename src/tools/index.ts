@@ -3,10 +3,12 @@ import { createMarketDataTools } from "./market-data/index";
 import { createTradingTools } from "./trading/index";
 import { createAccountTools } from "./account/index";
 import { createWebTools } from "./web/index";
+import { createAllSkillTools } from "../skills/index";
+import { createMemoryTools } from "../memory/long-term";
 
 // ==================== TOOL GROUPS ====================
 
-export type ToolGroup = "market-data" | "trading" | "account" | "web";
+export type ToolGroup = "market-data" | "trading" | "account" | "web" | "skills" | "memory";
 
 export interface ToolInfo {
   name: string;
@@ -17,7 +19,7 @@ export interface ToolInfo {
 // ==================== CREATE ALL TOOLS ====================
 
 export function createAllTools(groups?: ToolGroup[]): DynamicTool[] {
-  const allGroups: ToolGroup[] = groups || ["market-data", "trading", "account", "web"];
+  const allGroups: ToolGroup[] = groups || ["market-data", "trading", "account", "web", "skills", "memory"];
 
   const tools: DynamicTool[] = [];
 
@@ -32,6 +34,12 @@ export function createAllTools(groups?: ToolGroup[]): DynamicTool[] {
   }
   if (allGroups.includes("web")) {
     tools.push(...createWebTools());
+  }
+  if (allGroups.includes("skills")) {
+    tools.push(...createAllSkillTools());
+  }
+  if (allGroups.includes("memory")) {
+    tools.push(...createMemoryTools());
   }
 
   return tools;
@@ -58,6 +66,12 @@ function getToolGroup(name: string): ToolGroup {
   if (name.startsWith("account_") || name === "get_balance" || name === "get_positions") {
     return "account";
   }
+  if (name === "load_skill") {
+    return "skills";
+  }
+  if (name.startsWith("save_") || name.startsWith("get_trading") || name === "get_all_lessons") {
+    return "memory";
+  }
   return "web";
 }
 
@@ -67,3 +81,5 @@ export { createMarketDataTools } from "./market-data/index";
 export { createTradingTools } from "./trading/index";
 export { createAccountTools } from "./account/index";
 export { createWebTools } from "./web/index";
+export { createAllSkillTools } from "../skills/index";
+export { createMemoryTools } from "../memory/long-term";

@@ -1,32 +1,25 @@
-import { StateGraph, Annotation, START, END } from "@langchain/langgraph";
+import { StateGraph, Annotation, START, END, Send } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import type {
   DataSnapshot,
-  MarketAnalystOutput,
-  NewsAnalystOutput,
-  SocialAnalystOutput,
-  FundamentalsAnalystOutput,
-  BullResearcherOutput,
-  BearResearcherOutput,
-  ResearchManagerOutput,
-  TraderOutput,
   RiskDebateState,
-  PortfolioManagerOutput,
-} from "../types/index.ts";
-import { runMarketAnalyst } from "../agents/analysts/market-analyst.ts";
-import { runNewsAnalyst } from "../agents/analysts/news-analyst.ts";
-import { runSocialAnalyst } from "../agents/analysts/social-analyst.ts";
-import { runFundamentalsAnalyst } from "../agents/analysts/fundamentals-analyst.ts";
-import { runBullResearcher } from "../agents/researchers/bull-researcher.ts";
-import { runBearResearcher } from "../agents/researchers/bear-researcher.ts";
-import { runResearchManager } from "../agents/managers/research-manager.ts";
-import { runTrader } from "../agents/trader/trader.ts";
-import { runAggressiveAnalyst, runConservativeAnalyst, runNeutralAnalyst } from "../agents/risk/risk-debate.ts";
-import { runPortfolioManager } from "../agents/managers/portfolio-manager.ts";
+} from "../types/index";
+import { runMarketAnalyst } from "../agents/analysts/market-analyst";
+import { runNewsAnalyst } from "../agents/analysts/news-analyst";
+import { runSocialAnalyst } from "../agents/analysts/social-analyst";
+import { runFundamentalsAnalyst } from "../agents/analysts/fundamentals-analyst";
+import { runBullResearcher } from "../agents/researchers/bull-researcher";
+import { runBearResearcher } from "../agents/researchers/bear-researcher";
+import { runResearchManager } from "../agents/managers/research-manager";
+import { runTrader } from "../agents/trader/trader";
+import { runAggressiveAnalyst, runConservativeAnalyst, runNeutralAnalyst } from "../agents/risk/risk-debate";
+import { runPortfolioManager } from "../agents/managers/portfolio-manager";
+import { AnalysisStore } from "./stores";
+import { LongTermMemoryManager } from "../memory/long-term";
 
 // ==================== STATE ANNOTATION ====================
 
-const TradingStateAnnotation = Annotation.Root({
+export const TradingStateAnnotation = Annotation.Root({
   ticker: Annotation<string>,
   date: Annotation<string>,
   dataSnapshot: Annotation<DataSnapshot | null>,
@@ -57,75 +50,141 @@ const TradingStateAnnotation = Annotation.Root({
   // Final output
   finalTradeDecision: Annotation<string>,
 
-  // Metadata
+  // Memory
+  pastExperience: Annotation<string>,
+
+  // Error handling
   error: Annotation<string | null>,
+  retryCount: Annotation<number>,
+
+  // Metadata
   messages: Annotation<unknown[]>,
 });
+
+export type TradingState = typeof TradingStateAnnotation.State;
 
 // ==================== GRAPH NODES ====================
 
 function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
-  // Node: Market Analyst
-  async function marketAnalyst(state: typeof TradingStateAnnotation.State) {
-    console.log("[Graph] Đang chạy Market Analyst...");
+  const analysisStore = new AnalysisStore();
+  const memoryManager = new LongTermMemoryManager();
+
+  // Node: Load Past Experience
+  async function loadPastExperience(state: TradingState) {
+    console.log("[Memory] Đang tải kinh nghiệm quá khứ...");
+
+    const ticker = state.ticker;
+    const experiences = memoryManager.searchMemories(
+      ["trading", "experiences"],
+      ticker
+    );
+
+    let pastExperience = "";
+    if (experiences.length > 0) {
+      pastExperience = `Kinh nghiệm quá khứ với ${ticker}:\n`;
+      for (const exp of experiences.slice(0, 5)) {
+        const e = exp as any;
+        pastExperience += `- ${e.date}: ${e.event} → ${e.outcome} (${e.lesson})\n`;
+      }
+    }
+
+    console.log(`[Memory] Tìm thấy ${experiences.length} kinh nghiệm quá khứ`);
+    return { pastExperience };
+  }
+
+  // Node: Save Current Experience
+  async function saveCurrentExperience(state: TradingState) {
+    console.log("[Memory] Đang lưu kinh nghiệm hiện tại...");
+
+    const ticker = state.ticker;
+    const date = state.date;
+    const finalDecision = state.finalTradeDecision;
+
+    if (finalDecision) {
+      await memoryManager.saveEpisodicMemory(
+        ["trading", "experiences"],
+        `${ticker}-${date}`,
+        {
+          ticker,
+          date,
+          event: "Phân tích và quyết định giao dịch",
+          outcome: finalDecision,
+          lesson: "", // Để trống, sẽ được cập nhật sau khi có kết quả thực tế
+        }
+      );
+      console.log(`[Memory] Đã lưu kinh nghiệm cho ${ticker} ngày ${date}`);
+    }
+
+    return { pastExperience: state.pastExperience };
+  }
+
+  // Node: Parallel Analysts (dùng Send API)
+
+  // Node: Parallel Analysts (dùng Send API)
+  async function runAnalystsParallel(state: TradingState) {
+    console.log("[Graph] Chạy 4 Analysts song song...");
 
     const snapshot = state.dataSnapshot!;
-    const result = await runMarketAnalyst(llm, snapshot);
+    const ticker = state.ticker;
 
+    // Fan-out to parallel analysts using Send
+    return [
+      new Send("Market Analyst", { ticker, snapshot }),
+      new Send("Sentiment Analyst", { ticker, snapshot }),
+      new Send("News Analyst", { ticker, snapshot }),
+      new Send("Fundamentals Analyst", { ticker, snapshot }),
+    ];
+  }
+
+  // Node: Market Analyst
+  async function marketAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
+    console.log("[Graph] Đang chạy Market Analyst...");
+    const result = await runMarketAnalyst(llm, state.snapshot);
     return {
       marketReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
-  // Node: Social/Sentiment Analyst
-  async function socialAnalyst(state: typeof TradingStateAnnotation.State) {
+  // Node: Sentiment Analyst
+  async function sentimentAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
     console.log("[Graph] Đang chạy Sentiment Analyst...");
-
-    const snapshot = state.dataSnapshot!;
-    const result = await runSocialAnalyst(llm, snapshot);
-
+    const result = await runSocialAnalyst(llm, state.snapshot);
     return {
       sentimentReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
   // Node: News Analyst
-  async function newsAnalyst(state: typeof TradingStateAnnotation.State) {
+  async function newsAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
     console.log("[Graph] Đang chạy News Analyst...");
-
-    const snapshot = state.dataSnapshot!;
-    const result = await runNewsAnalyst(llm, snapshot);
-
+    const result = await runNewsAnalyst(llm, state.snapshot);
     return {
       newsReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
   // Node: Fundamentals Analyst
-  async function fundamentalsAnalyst(state: typeof TradingStateAnnotation.State) {
+  async function fundamentalsAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
     console.log("[Graph] Đang chạy Fundamentals Analyst...");
-
-    const snapshot = state.dataSnapshot!;
-    const result = await runFundamentalsAnalyst(llm, snapshot);
-
+    const result = await runFundamentalsAnalyst(llm, state.snapshot);
     return {
       fundamentalsReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
-  // Node: Clear Messages (between analysts)
-  async function clearMessages(state: typeof TradingStateAnnotation.State) {
-    return { messages: [] };
+  // Node: Aggregate Analyst Reports
+  async function aggregateAnalystReports(state: TradingState) {
+    console.log("[Graph] Tổng hợp báo cáo analysts...");
+    return {
+      messages: [
+        { role: "assistant", content: `Đã tổng hợp 4 báo cáo phân tích cho ${state.ticker}` },
+      ],
+    };
   }
 
   // Node: Bull Researcher
-  async function bullResearcher(state: typeof TradingStateAnnotation.State) {
+  async function bullResearcher(state: TradingState) {
     console.log("[Graph] Đang chạy Bull Researcher...");
-
     const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
 
@@ -153,14 +212,12 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
         bullHistory: debateState.bullHistory + "\n" + argument,
         count: debateState.count + 1,
       },
-      messages: [{ role: "assistant", content: argument }],
     };
   }
 
   // Node: Bear Researcher
-  async function bearResearcher(state: typeof TradingStateAnnotation.State) {
+  async function bearResearcher(state: TradingState) {
     console.log("[Graph] Đang chạy Bear Researcher...");
-
     const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
 
@@ -188,14 +245,12 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
         bearHistory: debateState.bearHistory + "\n" + argument,
         count: debateState.count + 1,
       },
-      messages: [{ role: "assistant", content: argument }],
     };
   }
 
   // Node: Research Manager
-  async function researchManager(state: typeof TradingStateAnnotation.State) {
+  async function researchManager(state: TradingState) {
     console.log("[Graph] Đang chạy Research Manager...");
-
     const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
 
@@ -204,8 +259,8 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
     const decision = await runResearchManager(
       deepLlm,
-      bullReport as BullResearcherOutput,
-      bearReport as BearResearcherOutput,
+      bullReport as any,
+      bearReport as any,
       debateState.history ? debateState.history.split("\n") : [],
       snapshot
     );
@@ -219,18 +274,16 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
         currentResponse: investmentPlan,
       },
       investmentPlan,
-      messages: [{ role: "assistant", content: investmentPlan }],
     };
   }
 
   // Node: Trader
-  async function trader(state: typeof TradingStateAnnotation.State) {
+  async function trader(state: TradingState) {
     console.log("[Graph] Đang chạy Trader...");
-
     const snapshot = state.dataSnapshot!;
 
-    const researchDecision: ResearchManagerOutput = {
-      decision: "neutral",
+    const researchDecision = {
+      decision: "neutral" as const,
       confidence: 0.5,
       reasoning: state.investmentPlan,
       bullSummary: "",
@@ -244,109 +297,99 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
     return {
       traderInvestmentPlan: traderPlan,
-      messages: [{ role: "assistant", content: traderPlan }],
     };
   }
 
-  // Node: Aggressive Risk Analyst
-  async function aggressiveAnalyst(state: typeof TradingStateAnnotation.State) {
+  // Node: Risk Team (Parallel with Send)
+  async function runRiskTeamParallel(state: TradingState) {
+    console.log("[Graph] Chạy Risk Team song song...");
+    const snapshot = state.dataSnapshot!;
+    const riskState = state.riskDebateState;
+    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
+
+    return [
+      new Send("Aggressive Analyst", { snapshot, riskState, traderDecision }),
+      new Send("Conservative Analyst", { snapshot, riskState, traderDecision }),
+      new Send("Neutral Analyst", { snapshot, riskState, traderDecision }),
+    ];
+  }
+
+  // Node: Aggressive Analyst
+  async function aggressiveAnalyst(state: { snapshot: DataSnapshot; riskState: RiskDebateState; traderDecision: any }) {
     console.log("[Graph] Đang chạy Aggressive Risk Analyst...");
-
-    const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
-
-    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
-
-    const response = await runAggressiveAnalyst(llm, traderDecision, snapshot, riskState);
-
+    const response = await runAggressiveAnalyst(llm, state.traderDecision, state.snapshot, state.riskState);
     return {
       riskDebateState: {
-        ...riskState,
-        history: riskState.history + "\n" + response,
-        aggressiveHistory: riskState.aggressiveHistory + "\n" + response,
-        latestSpeaker: "Aggressive",
+        ...state.riskState,
+        history: state.riskState.history + "\n" + response,
+        aggressiveHistory: state.riskState.aggressiveHistory + "\n" + response,
+        latestSpeaker: "Aggressive" as const,
         currentAggressiveResponse: response,
-        count: riskState.count + 1,
+        count: state.riskState.count + 1,
       },
-      messages: [{ role: "assistant", content: response }],
     };
   }
 
-  // Node: Conservative Risk Analyst
-  async function conservativeAnalyst(state: typeof TradingStateAnnotation.State) {
+  // Node: Conservative Analyst
+  async function conservativeAnalyst(state: { snapshot: DataSnapshot; riskState: RiskDebateState; traderDecision: any }) {
     console.log("[Graph] Đang chạy Conservative Risk Analyst...");
-
-    const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
-
-    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
-
-    const response = await runConservativeAnalyst(llm, traderDecision, snapshot, riskState);
-
+    const response = await runConservativeAnalyst(llm, state.traderDecision, state.snapshot, state.riskState);
     return {
       riskDebateState: {
-        ...riskState,
-        history: riskState.history + "\n" + response,
-        conservativeHistory: riskState.conservativeHistory + "\n" + response,
-        latestSpeaker: "Conservative",
+        ...state.riskState,
+        history: state.riskState.history + "\n" + response,
+        conservativeHistory: state.riskState.conservativeHistory + "\n" + response,
+        latestSpeaker: "Conservative" as const,
         currentConservativeResponse: response,
-        count: riskState.count + 1,
+        count: state.riskState.count + 1,
       },
-      messages: [{ role: "assistant", content: response }],
     };
   }
 
-  // Node: Neutral Risk Analyst
-  async function neutralAnalyst(state: typeof TradingStateAnnotation.State) {
+  // Node: Neutral Analyst
+  async function neutralAnalyst(state: { snapshot: DataSnapshot; riskState: RiskDebateState; traderDecision: any }) {
     console.log("[Graph] Đang chạy Neutral Risk Analyst...");
-
-    const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
-
-    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
-
-    const response = await runNeutralAnalyst(llm, traderDecision, snapshot, riskState);
-
+    const response = await runNeutralAnalyst(llm, state.traderDecision, state.snapshot, state.riskState);
     return {
       riskDebateState: {
-        ...riskState,
-        history: riskState.history + "\n" + response,
-        neutralHistory: riskState.neutralHistory + "\n" + response,
-        latestSpeaker: "Neutral",
+        ...state.riskState,
+        history: state.riskState.history + "\n" + response,
+        neutralHistory: state.riskState.neutralHistory + "\n" + response,
+        latestSpeaker: "Neutral" as const,
         currentNeutralResponse: response,
-        count: riskState.count + 1,
+        count: state.riskState.count + 1,
       },
-      messages: [{ role: "assistant", content: response }],
+    };
+  }
+
+  // Node: Aggregate Risk Reports
+  async function aggregateRiskReports(state: TradingState) {
+    console.log("[Graph] Tổng hợp báo cáo risk...");
+    return {
+      messages: [
+        { role: "assistant", content: `Đã tổng hợp báo cáo risk cho ${state.ticker}` },
+      ],
     };
   }
 
   // Node: Portfolio Manager
-  async function portfolioManager(state: typeof TradingStateAnnotation.State) {
+  async function portfolioManager(state: TradingState) {
     console.log("[Graph] Đang chạy Portfolio Manager...");
-
     const snapshot = state.dataSnapshot!;
     const riskState = state.riskDebateState;
+    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
 
-    const traderDecision = {
-      action: "hold" as const,
-      ticker: state.ticker,
-      confidence: 0.5,
-      targetPrice: snapshot.closePrice,
-      stopLoss: snapshot.closePrice * 0.95,
-      positionSize: "Không xác định",
-      timeframe: "Không xác định",
-      reasoning: state.traderInvestmentPlan,
-    };
-
-    const decision = await runPortfolioManager(
-      deepLlm,
-      traderDecision,
-      riskState,
-      snapshot,
-      state.investmentPlan
-    );
+    const decision = await runPortfolioManager(deepLlm, traderDecision, riskState, snapshot);
 
     const finalDecision = `FINAL TRADE DECISION: ${decision.finalDecision.toUpperCase()} ${decision.ticker}\nAction: ${decision.action.toUpperCase()}\nReasoning: ${decision.reasoning}`;
+
+    // Lưu kết quả vào store
+    analysisStore.save({
+      ticker: state.ticker,
+      date: state.date,
+      result: finalDecision,
+      timestamp: Date.now(),
+    });
 
     return {
       finalTradeDecision: finalDecision,
@@ -354,59 +397,57 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
         ...riskState,
         judgeDecision: finalDecision,
       },
-      messages: [{ role: "assistant", content: finalDecision }],
+    };
+  }
+
+  // Node: Error Handler
+  async function errorHandler(state: TradingState) {
+    console.log(`[Graph] Xử lý lỗi: ${state.error}`);
+    return {
+      error: null,
+      retryCount: state.retryCount + 1,
     };
   }
 
   return {
+    runAnalystsParallel,
     marketAnalyst,
-    socialAnalyst,
+    sentimentAnalyst,
     newsAnalyst,
     fundamentalsAnalyst,
-    clearMessages,
+    aggregateAnalystReports,
     bullResearcher,
     bearResearcher,
     researchManager,
     trader,
+    runRiskTeamParallel,
     aggressiveAnalyst,
     conservativeAnalyst,
     neutralAnalyst,
+    aggregateRiskReports,
     portfolioManager,
+    errorHandler,
+    loadPastExperience,
+    saveCurrentExperience,
   };
 }
 
-// ==================== CONDITIONAL LOGIC ====================
+// ==================== CONDITIONAL EDGES ====================
 
-function shouldContinueDebate(state: typeof TradingStateAnnotation.State): string {
-  const debateState = state.investmentDebateState;
+function shouldContinueDebate(state: TradingState): string {
   const maxRounds = 2;
-
-  if (debateState.count >= maxRounds * 2) {
+  if (state.investmentDebateState.count >= maxRounds * 2) {
     return "Research Manager";
   }
-
-  if (debateState.count % 2 === 0) {
-    return "Bull Researcher";
-  }
-  return "Bear Researcher";
+  return state.investmentDebateState.count % 2 === 0 ? "Bear Researcher" : "Bull Researcher";
 }
 
-function shouldContinueRiskAnalysis(state: typeof TradingStateAnnotation.State): string {
-  const riskState = state.riskDebateState;
-  const maxRounds = 2;
-
-  if (riskState.count >= maxRounds * 3) {
-    return "Portfolio Manager";
+function shouldRetry(state: TradingState): string {
+  const maxRetries = 3;
+  if (state.error && state.retryCount < maxRetries) {
+    return "Error Handler";
   }
-
-  const lastSpeaker = riskState.latestSpeaker;
-  if (lastSpeaker === "Aggressive" || lastSpeaker === null) {
-    return "Conservative Analyst";
-  }
-  if (lastSpeaker === "Conservative") {
-    return "Neutral Analyst";
-  }
-  return "Aggressive Analyst";
+  return "continue";
 }
 
 // ==================== BUILD GRAPH ====================
@@ -415,39 +456,57 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const nodes = createGraphNodes(llm, deepLlm);
 
   const workflow = new StateGraph(TradingStateAnnotation)
-    // Add analyst nodes (sequential)
+    // Memory
+    .addNode("Load Past Experience", nodes.loadPastExperience)
+    .addNode("Save Experience", nodes.saveCurrentExperience)
+
+    // Analysts (Parallel with Send API)
+    .addNode("Run Analysts", nodes.runAnalystsParallel)
     .addNode("Market Analyst", nodes.marketAnalyst)
-    .addNode("Sentiment Analyst", nodes.socialAnalyst)
+    .addNode("Sentiment Analyst", nodes.sentimentAnalyst)
     .addNode("News Analyst", nodes.newsAnalyst)
     .addNode("Fundamentals Analyst", nodes.fundamentalsAnalyst)
-    .addNode("Clear Messages", nodes.clearMessages)
+    .addNode("Aggregate Reports", nodes.aggregateAnalystReports)
 
-    // Add debate nodes
+    // Debate
     .addNode("Bull Researcher", nodes.bullResearcher)
     .addNode("Bear Researcher", nodes.bearResearcher)
     .addNode("Research Manager", nodes.researchManager)
 
-    // Add trader
+    // Trader
     .addNode("Trader", nodes.trader)
 
-    // Add risk analysis nodes
+    // Risk Team (Parallel with Send API)
+    .addNode("Run Risk Team", nodes.runRiskTeamParallel)
     .addNode("Aggressive Analyst", nodes.aggressiveAnalyst)
     .addNode("Conservative Analyst", nodes.conservativeAnalyst)
     .addNode("Neutral Analyst", nodes.neutralAnalyst)
+    .addNode("Aggregate Risk Reports", nodes.aggregateRiskReports)
+
+    // Portfolio Manager
     .addNode("Portfolio Manager", nodes.portfolioManager)
 
-    // Define edges - Analysts run sequentially
-    .addEdge(START, "Market Analyst")
-    .addEdge("Market Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "Sentiment Analyst")
-    .addEdge("Sentiment Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "News Analyst")
-    .addEdge("News Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "Fundamentals Analyst")
-    .addEdge("Fundamentals Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "Bull Researcher")
+    // Error Handler
+    .addNode("Error Handler", nodes.errorHandler)
 
-    // Debate loop
+    // ===== EDGES =====
+
+    // Start → Load Past Experience
+    .addEdge(START, "Load Past Experience")
+
+    // Load Past Experience → Parallel Analysts
+    .addEdge("Load Past Experience", "Run Analysts")
+
+    // Parallel Analysts → Individual Analysts (Send API)
+    .addEdge("Market Analyst", "Aggregate Reports")
+    .addEdge("Sentiment Analyst", "Aggregate Reports")
+    .addEdge("News Analyst", "Aggregate Reports")
+    .addEdge("Fundamentals Analyst", "Aggregate Reports")
+
+    // Aggregate → Bull Researcher
+    .addEdge("Aggregate Reports", "Bull Researcher")
+
+    // Debate Loop
     .addConditionalEdges("Bull Researcher", shouldContinueDebate, {
       "Bear Researcher": "Bear Researcher",
       "Research Manager": "Research Manager",
@@ -457,31 +516,25 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
       "Research Manager": "Research Manager",
     })
 
-    // Research Manager -> Trader
+    // Research Manager → Trader
     .addEdge("Research Manager", "Trader")
 
-    // Trader -> Risk Analysis
-    .addEdge("Trader", "Aggressive Analyst")
+    // Trader → Parallel Risk Team
+    .addEdge("Trader", "Run Risk Team")
 
-    // Risk analysis loop
-    .addConditionalEdges("Aggressive Analyst", shouldContinueRiskAnalysis, {
-      "Conservative Analyst": "Conservative Analyst",
-      "Neutral Analyst": "Neutral Analyst",
-      "Portfolio Manager": "Portfolio Manager",
-    })
-    .addConditionalEdges("Conservative Analyst", shouldContinueRiskAnalysis, {
-      "Aggressive Analyst": "Aggressive Analyst",
-      "Neutral Analyst": "Neutral Analyst",
-      "Portfolio Manager": "Portfolio Manager",
-    })
-    .addConditionalEdges("Neutral Analyst", shouldContinueRiskAnalysis, {
-      "Aggressive Analyst": "Aggressive Analyst",
-      "Conservative Analyst": "Conservative Analyst",
-      "Portfolio Manager": "Portfolio Manager",
-    })
+    // Parallel Risk Team → Individual Analysts (Send API)
+    .addEdge("Aggressive Analyst", "Aggregate Risk Reports")
+    .addEdge("Conservative Analyst", "Aggregate Risk Reports")
+    .addEdge("Neutral Analyst", "Aggregate Risk Reports")
 
-    // Portfolio Manager -> END
-    .addEdge("Portfolio Manager", END);
+    // Aggregate Risk → Portfolio Manager
+    .addEdge("Aggregate Risk Reports", "Portfolio Manager")
+
+    // Portfolio Manager → Save Experience
+    .addEdge("Portfolio Manager", "Save Experience")
+
+    // Save Experience → End
+    .addEdge("Save Experience", END);
 
   return workflow.compile();
 }
@@ -493,9 +546,7 @@ export async function analyze(
   ticker: string,
   date: string
 ): Promise<string> {
-  const deepLlm = new ChatOpenAI({
-    temperature: 0.3,
-  });
+  const deepLlm = new ChatOpenAI({ temperature: 0.3 });
 
   const graph = buildTradingGraph(llm, deepLlm);
 
@@ -511,7 +562,7 @@ export async function analyze(
     count: 0,
   };
 
-  const initialState: Partial<typeof TradingStateAnnotation.State> = {
+  const initialState: Partial<TradingState> = {
     ticker,
     date,
     dataSnapshot: {
@@ -547,11 +598,84 @@ export async function analyze(
     traderInvestmentPlan: "",
     riskDebateState: initialRiskState,
     finalTradeDecision: "",
+    pastExperience: "",
     error: null,
+    retryCount: 0,
     messages: [],
   };
 
   const result = await graph.invoke(initialState);
 
   return result.finalTradeDecision || "Không có kết quả";
+}
+
+// ==================== STREAMING ANALYZE ====================
+
+export async function* analyzeStreaming(
+  llm: ChatOpenAI,
+  ticker: string,
+  date: string
+) {
+  const deepLlm = new ChatOpenAI({ temperature: 0.3 });
+  const graph = buildTradingGraph(llm, deepLlm);
+
+  const initialRiskState: RiskDebateState = {
+    history: "",
+    aggressiveHistory: "",
+    conservativeHistory: "",
+    neutralHistory: "",
+    latestSpeaker: null,
+    currentAggressiveResponse: "",
+    currentConservativeResponse: "",
+    currentNeutralResponse: "",
+    count: 0,
+  };
+
+  const initialState: Partial<TradingState> = {
+    ticker,
+    date,
+    dataSnapshot: {
+      ticker,
+      date,
+      closePrice: 0,
+      ohlcHistory: [],
+      latestTrades: [],
+      latestQuotes: {},
+      foreignTrading: {},
+      secDef: {},
+      instruments: {},
+      marketNews: "",
+      socialSentiment: "",
+      marketReport: "",
+      sentimentReport: "",
+      newsReport: "",
+      fundamentalsReport: "",
+    },
+    marketReport: "",
+    sentimentReport: "",
+    newsReport: "",
+    fundamentalsReport: "",
+    investmentDebateState: {
+      history: "",
+      bullHistory: "",
+      bearHistory: "",
+      currentResponse: "",
+      judgeDecision: "",
+      count: 0,
+    },
+    investmentPlan: "",
+    traderInvestmentPlan: "",
+    riskDebateState: initialRiskState,
+    finalTradeDecision: "",
+    pastExperience: "",
+    error: null,
+    retryCount: 0,
+    messages: [],
+  };
+
+  // Stream updates
+  const streamIterable = await graph.stream(initialState, { streamMode: "updates" });
+  for await (const chunk of streamIterable) {
+    yield chunk;
+  }
 }
