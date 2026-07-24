@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "dnse": {
+      "command": "bun",
+      "args": ["run", "src/index.ts"],
+      "cwd": "/Users/cuongpham/Deverlop/typescript/dnse/mcp",
+      "env": {
+        "DNSE_API_KEY": "${DNSE_API_KEY}",
+        "DNSE_API_SECRET": "${DNSE_API_SECRET}"
+      }
+    }
+  }
+}

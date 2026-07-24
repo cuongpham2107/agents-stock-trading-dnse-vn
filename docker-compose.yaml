@@ -1,0 +1,43 @@
+name: dnse
+
+services:
+  # Firecrawl Self-hosted
+  firecrawl-api:
+    build: ./firecrawl/apps/api
+    environment:
+      PORT: 3002
+      HOST: "0.0.0.0"
+      REDIS_URL: redis://redis:6379
+      REDIS_RATE_LIMIT_URL: redis://redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+      USE_DB_AUTHENTICATION: "false"
+      BULL_AUTH_KEY: CHANGEME
+    ports:
+      - "3002:3002"
+    depends_on:
+      - redis
+      - playwright-service
+    networks:
+      - backend
+
+  playwright-service:
+    build: ./firecrawl/apps/playwright-service-ts
+    environment:
+      PORT: 3000
+    networks:
+      - backend
+    cpus: 2.0
+    mem_limit: 4G
+    memswap_limit: 4G
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+
+  redis:
+    image: redis:alpine
+    networks:
+      - backend
+    command: redis-server --bind 0.0.0.0
+
+networks:
+  backend:
+    driver: bridge
