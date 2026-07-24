@@ -275,6 +275,21 @@ LLM_API_KEY=your_api_key_here
 
 ## Sử dụng
 
+### Khởi chạy nhanh
+
+```bash
+# Khởi chạy tất cả (MCP + Agent)
+bun run start.ts
+
+# Hoặc chạy từng service
+bun run start.ts --mcp        # Chỉ chạy MCP Server
+bun run start.ts --agent      # Chỉ chạy Agent
+bun run start.ts --firecrawl  # Chỉ chạy Firecrawl (Docker)
+bun run start.ts --docker     # Chạy tất cả qua Docker Compose
+```
+
+### Khởi chạy thủ công
+
 ```bash
 # Terminal 1: Start MCP Server
 cd mcp && bun run start
