@@ -41,17 +41,7 @@ NHIỆM VỤ: Đánh giá tranh luận và đưa ra investment plan rõ ràng ch
 
 Hãy đưa ra quyết định rõ ràng dựa trên bằng chứng từ cả hai phía.
 
-OUTPUT FORMAT (JSON):
-{
-  "decision": "bullish|bearish|neutral",
-  "rating": "Buy|Overweight|Hold|Underweight|Sell",
-  "confidence": 0.7,
-  "reasoning": "Lý do chi tiết dựa trên bằng chứng",
-  "bullSummary": "Tóm tắt luận điểm bull",
-  "bearSummary": "Tóm tắt luận điểm bear",
-  "keyFactors": ["Yếu tố quyết định 1", "Yếu tố quyết định 2"],
-  "actionPlan": "Kế hoạch hành động cụ thể"
-}`;
+OUTPUT: Trả về JSON với các field: decision (bullish|bearish|neutral), rating (Buy|Overweight|Hold|Underweight|Sell), confidence (number), reasoning (string), bullSummary (string), bearSummary (string), keyFactors (array), actionPlan (string).`;
 
 export async function runResearchManager(
   llm: ChatOpenAI,

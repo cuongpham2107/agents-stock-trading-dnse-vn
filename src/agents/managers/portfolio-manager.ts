@@ -47,20 +47,7 @@ NHIỆM VỤ: Tổng hợp tranh luận risk debate và đưa ra quyết định
 
 Hãy đưa ra quyết định dứt khoát, dựa trên bằng chứng cụ thể từ các analyst.
 
-OUTPUT FORMAT (JSON):
-{
-  "finalDecision": "approve|reject|modify",
-  "rating": "Buy|Overweight|Hold|Underweight|Sell",
-  "ticker": "${"{ticker}"}",
-  "action": "buy|sell|hold|wait",
-  "adjustedTargetPrice": 25.0,
-  "adjustedStopLoss": 22.0,
-  "adjustedPositionSize": "2-5% portfolio",
-  "timeframe": "1-3 tháng",
-  "reasoning": "Lý do quyết định chi tiết",
-  "riskAdjustments": ["Điều chỉnh 1", "Điều chỉnh 2"],
-  "keyTakeaways": ["Bài học quan trọng 1", "Bài học quan trọng 2"]
-}`;
+OUTPUT: Trả về JSON với các field: finalDecision (approve|reject|modify), action (buy|sell|hold|wait), adjustedTargetPrice (number), adjustedStopLoss (number), adjustedPositionSize (string), reasoning (string), riskAdjustments (array).`;
 
 export async function runPortfolioManager(
   llm: ChatOpenAI,
