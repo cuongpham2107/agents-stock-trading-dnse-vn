@@ -12,6 +12,7 @@ import { runTrader } from "../agents/trader/trader";
 import { runAggressiveAnalyst, runConservativeAnalyst, runNeutralAnalyst } from "../agents/risk/risk-debate";
 import { runPortfolioManager } from "../agents/managers/portfolio-manager";
 import { LongTermMemoryManager } from "../memory/long-term";
+import { graphLogger, logAnalysisStart, logAnalysisStep, logAnalysisResult, logAnalysisError } from "../utils/logger";
 
 // ==================== STATE ====================
 
@@ -50,41 +51,46 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   async function marketAnalyst(s: State) {
-    console.log("▶ Market Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("Market Analyst", s.ticker);
     const r = await runMarketAnalyst(llm, s.dataSnapshot!);
-    console.log("✔ Market Analyst done");
+    graphLogger.nodeDone("Market Analyst", Date.now() - start);
     return { marketReport: r.summary || JSON.stringify(r) };
   }
 
   async function sentimentAnalyst(s: State) {
-    console.log("▶ Sentiment Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("Sentiment Analyst", s.ticker);
     const r = await runSocialAnalyst(llm, s.dataSnapshot!);
-    console.log("✔ Sentiment Analyst done");
+    graphLogger.nodeDone("Sentiment Analyst", Date.now() - start);
     return { sentimentReport: r.summary || JSON.stringify(r) };
   }
 
   async function newsAnalyst(s: State) {
-    console.log("▶ News Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("News Analyst", s.ticker);
     const r = await runNewsAnalyst(llm, s.dataSnapshot!);
-    console.log("✔ News Analyst done");
+    graphLogger.nodeDone("News Analyst", Date.now() - start);
     return { newsReport: r.summary || JSON.stringify(r) };
   }
 
   async function fundamentalsAnalyst(s: State) {
-    console.log("▶ Fundamentals Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("Fundamentals Analyst", s.ticker);
     const r = await runFundamentalsAnalyst(llm, s.dataSnapshot!);
-    console.log("✔ Fundamentals Analyst done");
+    graphLogger.nodeDone("Fundamentals Analyst", Date.now() - start);
     return { fundamentalsReport: r.summary || JSON.stringify(r) };
   }
 
   async function bullResearcher(s: State) {
-    console.log("▶ Bull Researcher (round " + (s.debateCount + 1) + ")...");
+    const start = Date.now();
+    graphLogger.nodeStart("Bull Researcher", `round ${s.debateCount + 1}`);
     const r = await runBullResearcher(llm,
       { summary: s.marketReport || "" }, { summary: s.newsReport || "" },
       { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
       s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
     );
-    console.log("✔ Bull Researcher done");
+    graphLogger.nodeDone("Bull Researcher", Date.now() - start);
     return {
       debateHistory: (s.debateHistory || "") + "\nBull: " + r.argument,
       debateCount: s.debateCount + 1,
@@ -92,13 +98,14 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   async function bearResearcher(s: State) {
-    console.log("▶ Bear Researcher (round " + (s.debateCount + 1) + ")...");
+    const start = Date.now();
+    graphLogger.nodeStart("Bear Researcher", `round ${s.debateCount + 1}`);
     const r = await runBearResearcher(llm,
       { summary: s.marketReport || "" }, { summary: s.newsReport || "" },
       { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
       s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
     );
-    console.log("✔ Bear Researcher done");
+    graphLogger.nodeDone("Bear Researcher", Date.now() - start);
     return {
       debateHistory: (s.debateHistory || "") + "\nBear: " + r.argument,
       debateCount: s.debateCount + 1,
@@ -106,7 +113,8 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   async function researchManager(s: State) {
-    console.log("▶ Research Manager...");
+    const start = Date.now();
+    graphLogger.nodeStart("Research Manager");
     const r = await runResearchManager(deepLlm,
       { summary: s.debateHistory } as any,
       { summary: s.debateHistory } as any,
@@ -114,50 +122,55 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
       s.dataSnapshot!
     );
     const plan = `Rating: ${r.decision} | Confidence: ${r.confidence} | ${r.reasoning}`;
-    console.log("✔ Research Manager done");
+    graphLogger.nodeDone("Research Manager", Date.now() - start);
     return { investmentPlan: plan };
   }
 
   async function trader(s: State) {
-    console.log("▶ Trader...");
+    const start = Date.now();
+    graphLogger.nodeStart("Trader");
     const r = await runTrader(llm, {
       action: "hold", ticker: s.ticker, confidence: 0.5,
       targetPrice: 0, stopLoss: 0, positionSize: "", timeframe: "", reasoning: s.investmentPlan
     } as any, s.dataSnapshot!);
     const plan = `${r.action} ${r.ticker} | Target: ${r.targetPrice} | SL: ${r.stopLoss}`;
-    console.log("✔ Trader done");
+    graphLogger.nodeDone("Trader", Date.now() - start);
     return { traderPlan: plan };
   }
 
   async function aggressiveAnalyst(s: State) {
-    console.log("▶ Aggressive Risk Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("Aggressive Risk");
     const r = await runAggressiveAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
-    console.log("✔ Aggressive done");
+    graphLogger.nodeDone("Aggressive Risk", Date.now() - start);
     return { riskHistory: (s.riskHistory || "") + "\nAggressive: " + r, riskCount: s.riskCount + 1 };
   }
 
   async function conservativeAnalyst(s: State) {
-    console.log("▶ Conservative Risk Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("Conservative Risk");
     const r = await runConservativeAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
-    console.log("✔ Conservative done");
+    graphLogger.nodeDone("Conservative Risk", Date.now() - start);
     return { riskHistory: (s.riskHistory || "") + "\nConservative: " + r, riskCount: s.riskCount + 1 };
   }
 
   async function neutralAnalyst(s: State) {
-    console.log("▶ Neutral Risk Analyst...");
+    const start = Date.now();
+    graphLogger.nodeStart("Neutral Risk");
     const r = await runNeutralAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
-    console.log("✔ Neutral done");
+    graphLogger.nodeDone("Neutral Risk", Date.now() - start);
     return { riskHistory: (s.riskHistory || "") + "\nNeutral: " + r, riskCount: s.riskCount + 1 };
   }
 
   async function portfolioManager(s: State) {
-    console.log("▶ Portfolio Manager...");
+    const start = Date.now();
+    graphLogger.nodeStart("Portfolio Manager");
     const r = await runPortfolioManager(deepLlm, { action: "hold", ticker: s.ticker } as any, { history: s.riskHistory } as any, s.dataSnapshot!);
     const decision = `${r.finalDecision} | ${r.action} | ${r.reasoning}`;
     await memory.saveEpisodicMemory(["trading", "experiences"], `${s.ticker}-${s.date}`, {
       ticker: s.ticker, date: s.date, event: "Analysis", outcome: decision, lesson: ""
     });
-    console.log("✔ Portfolio Manager done");
+    graphLogger.nodeDone("Portfolio Manager", Date.now() - start);
     return { finalDecision: decision };
   }
 
@@ -222,6 +235,8 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 // ==================== ANALYZE ====================
 
 export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Promise<string> {
+  logAnalysisStart(ticker);
+
   // Tạo deepLlm với cùng config với llm
   const deepLlm = new ChatOpenAI({
     model: process.env.DEEP_MODEL || "nvidia/deepseek-ai/deepseek-v4-pro",
@@ -232,6 +247,16 @@ export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Pr
     },
   });
   const graph = buildTradingGraph(llm, deepLlm);
+
+  logAnalysisStep(1, 7, "Load Past Experience");
+  logAnalysisStep(2, 7, "4 Analysts (Market, Sentiment, News, Fundamentals)");
+  logAnalysisStep(3, 7, "Bull/Bear Debate");
+  logAnalysisStep(4, 7, "Research Manager");
+  logAnalysisStep(5, 7, "Trader");
+  logAnalysisStep(6, 7, "Risk Team (Aggressive, Conservative, Neutral)");
+  logAnalysisStep(7, 7, "Portfolio Manager");
+
+  console.log("\n");
 
   const result = await graph.invoke({
     ticker, date,
