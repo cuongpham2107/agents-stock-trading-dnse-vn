@@ -496,8 +496,7 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addEdge("conservative", "portfolio")
     .addEdge("neutral", "portfolio")
     .addEdge("portfolio", "save")
-    .addEdge("save", END)
-    .compile();
+    .addEdge("save", END)    .compile();
 }
 
 // ==================== ANALYZE ====================

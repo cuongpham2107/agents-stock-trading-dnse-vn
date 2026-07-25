@@ -26,7 +26,13 @@ class PersistentStore {
     if (existsSync(this.persistPath)) {
       try {
         const data = JSON.parse(readFileSync(this.persistPath, "utf-8"));
-        this.store = new Map(Object.entries(data));
+        // JSON.parse trả về plain object, phải convert cả 2 tầng về Map
+        this.store = new Map(
+          Object.entries(data).map(([ns, items]) => [
+            ns,
+            new Map(Object.entries(items as Record<string, StoreItem>)),
+          ])
+        );
       } catch (error) {
         console.error("[Memory] Lỗi khi tải dữ liệu:", error);
       }
@@ -35,7 +41,11 @@ class PersistentStore {
 
   private save(): void {
     try {
-      const data = Object.fromEntries(this.store);
+      // Convert Map → plain object để JSON.stringify được
+      const data: Record<string, Record<string, StoreItem>> = {};
+      for (const [ns, items] of this.store.entries()) {
+        data[ns] = Object.fromEntries(items.entries());
+      }
       writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
     } catch (error) {
       console.error("[Memory] Lỗi khi lưu dữ liệu:", error);
