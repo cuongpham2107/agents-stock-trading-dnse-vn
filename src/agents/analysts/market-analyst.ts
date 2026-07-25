@@ -23,15 +23,9 @@ NHIỆM VỤ: Phân tích dữ liệu thị trường và đưa ra báo cáo chi
 - Volume: VWMA
 
 **Quy tắc:**
-1. LUÔN dùng tools để lấy dữ liệu real-time
-2. Phân tích OHLC history, giá đóng cửa, bid/ask
-3. Xác định xu hướng giá, mức hỗ trợ/kháng cự
-4. Đánh giá khối lượng giao dịch
-5. Chọn 8 chỉ số phù hợp nhất cho điều kiện thị trường hiện tại
-
-**Trước khi viết báo cáo cuối cùng:**
-- Gọi get_verified_market_snapshot để có dữ liệu chính xác nhất
-- Nếu có sự khác biệt giữa các nguồn, ghi chú rõ
+1. Phân tích OHLC history, giá đóng cửa, bid/ask
+2. Xác định xu hướng giá, mức hỗ trợ/kháng cự
+3. Đánh giá khối lượng giao dịch
 
 **Output:** Viết báo cáo chi tiết, thêm bảng Markdown tóm tắt ở cuối.
 
