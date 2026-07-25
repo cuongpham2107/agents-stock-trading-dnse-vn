@@ -1,6 +1,6 @@
 import { StateGraph, Annotation, START, END } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
-import type { DataSnapshot, RiskDebateState } from "../types/index";
+import type { DataSnapshot, TraderOutput, RiskDebateState } from "../types/index";
 import { runMarketAnalyst } from "../agents/analysts/market-analyst";
 import { runNewsAnalyst } from "../agents/analysts/news-analyst";
 import { runSocialAnalyst } from "../agents/analysts/social-analyst";
@@ -12,7 +12,7 @@ import { runTrader } from "../agents/trader/trader";
 import { runAggressiveAnalyst, runConservativeAnalyst, runNeutralAnalyst } from "../agents/risk/risk-debate";
 import { runPortfolioManager } from "../agents/managers/portfolio-manager";
 import { LongTermMemoryManager } from "../memory/long-term";
-import { graphLogger, logAnalysisStart, logAnalysisStep, logAnalysisResult, logAnalysisError, logNodeResult } from "../utils/logger";
+import { graphLogger, logAnalysisStart, logAnalysisStep, logNodeResult } from "../utils/logger";
 import { DnseServer, API_BASE_URL } from "../tools/dnse/server";
 
 // ==================== BUILD DATA SNAPSHOT ====================
@@ -27,52 +27,42 @@ async function buildDataSnapshot(ticker: string, date: string): Promise<DataSnap
     try {
       const raw = await server.getJson(path, url);
       return JSON.parse(raw);
-    } catch {
+    } catch (err) {
+      // FIX #5: log lỗi thay vì nuốt im lặng
+      console.warn(`[buildDataSnapshot] API failed for ${path}: ${err}`);
       return {};
     }
   };
 
-  // Tính toán khoảng thời gian 90 ngày trước
   const toDate = new Date(date);
   const fromDate = new Date(date);
   fromDate.setDate(fromDate.getDate() - 90);
   const fromTs = Math.floor(fromDate.getTime() / 1000);
   const toTs = Math.floor(toDate.getTime() / 1000);
-  const fromDateStr = fromDate.toISOString().split("T")[0];
+  // FIX #5: xoá dead code fromDateStr
 
-  // Fetch song song tất cả dữ liệu cần thiết
   const [closePriceRaw, ohlcRaw, latestTradesRaw, latestQuotesRaw, foreignRaw, secDefRaw, instrumentsRaw] =
     await Promise.all([
       safeGet(`/price/${ticker}/close`, `${API_BASE_URL}/price/${ticker}/close`),
-      safeGet(
-        "/price/ohlc",
-        `${API_BASE_URL}/price/ohlc?symbol=${ticker}&type=STOCK&resolution=1D&from=${fromTs}&to=${toTs}`
-      ),
-      safeGet(
-        `/price/${ticker}/trades/latest`,
-        `${API_BASE_URL}/price/${ticker}/trades/latest?boardId=G1`
-      ),
-      safeGet(
-        `/price/${ticker}/quotes/latest`,
-        `${API_BASE_URL}/price/${ticker}/quotes/latest`
-      ),
-      safeGet(
-        `/price/${ticker}/foreign-trading`,
-        `${API_BASE_URL}/price/${ticker}/foreign-trading?from=${fromTs}&to=${toTs}`
-      ),
+      safeGet("/price/ohlc", `${API_BASE_URL}/price/ohlc?symbol=${ticker}&type=STOCK&resolution=1D&from=${fromTs}&to=${toTs}`),
+      safeGet(`/price/${ticker}/trades/latest`, `${API_BASE_URL}/price/${ticker}/trades/latest?boardId=G1`),
+      safeGet(`/price/${ticker}/quotes/latest`, `${API_BASE_URL}/price/${ticker}/quotes/latest`),
+      safeGet(`/price/${ticker}/foreign-trading`, `${API_BASE_URL}/price/${ticker}/foreign-trading?from=${fromTs}&to=${toTs}`),
       safeGet(`/price/${ticker}/secdef`, `${API_BASE_URL}/price/${ticker}/secdef`),
       safeGet("/instruments", `${API_BASE_URL}/instruments?symbol=${ticker}&limit=1`),
     ]);
 
   // Parse giá đóng cửa — API trả về {prices: [{closePrice, boardId, ...}]}
   const closePriceData = closePriceRaw as Record<string, unknown>;
-  const pricesArr = Array.isArray(closePriceData?.prices) ? (closePriceData.prices as Array<Record<string, unknown>>) : [];
-  // Ưu tiên boardId G1 (lô chẵn), fallback sang phần tử đầu tiên có giá > 0
-  const mainPrice = pricesArr.find((p) => p.boardId === "G1" && (p.closePrice as number) > 0)
-    || pricesArr.find((p) => (p.closePrice as number) > 0);
+  const pricesArr = Array.isArray(closePriceData?.prices)
+    ? (closePriceData.prices as Array<Record<string, unknown>>)
+    : [];
+  const mainPrice =
+    pricesArr.find((p) => p.boardId === "G1" && (p.closePrice as number) > 0) ||
+    pricesArr.find((p) => (p.closePrice as number) > 0);
   const closePrice = (mainPrice?.closePrice as number) || 0;
 
-  // Parse OHLC history — API trả về {t:[], o:[], h:[], l:[], c:[], v:[]}
+  // Parse OHLC — API trả về {t:[], o:[], h:[], l:[], c:[], v:[]}
   const ohlcData = ohlcRaw as Record<string, unknown>;
   let ohlcHistory: unknown[] = [];
   if (Array.isArray(ohlcData?.t) && (ohlcData.t as unknown[]).length > 0) {
@@ -83,8 +73,8 @@ async function buildDataSnapshot(ticker: string, date: string): Promise<DataSnap
     const c = ohlcData.c as number[];
     const v = ohlcData.v as number[];
     ohlcHistory = t.map((ts, i) => ({ t: ts, o: o[i], h: h[i], l: l[i], c: c[i], v: v[i] }));
-  } else if (Array.isArray(ohlcData?.data)) {
-    ohlcHistory = ohlcData.data as unknown[];
+  } else if (Array.isArray((ohlcData as any)?.data)) {
+    ohlcHistory = (ohlcData as any).data as unknown[];
   }
 
   // Parse latest trades
@@ -96,43 +86,46 @@ async function buildDataSnapshot(ticker: string, date: string): Promise<DataSnap
     : [];
 
   return {
-    ticker,
-    date,
-    closePrice,
-    ohlcHistory,
-    latestTrades,
+    ticker, date, closePrice, ohlcHistory, latestTrades,
     latestQuotes: latestQuotesRaw,
     foreignTrading: foreignRaw,
     secDef: secDefRaw,
     instruments: instrumentsRaw,
-    marketNews: "",
-    socialSentiment: "",
-    marketReport: "",
-    sentimentReport: "",
-    newsReport: "",
-    fundamentalsReport: "",
+    marketNews: "", socialSentiment: "",
+    marketReport: "", sentimentReport: "", newsReport: "", fundamentalsReport: "",
   };
 }
 
+// ==================== STATE ====================
 
+const MAX_DEBATE_ROUNDS = 2;
 
 const State = Annotation.Root({
   ticker: Annotation<string>,
   date: Annotation<string>,
   dataSnapshot: Annotation<DataSnapshot | null>,
+  // Analyst reports
   marketReport: Annotation<string>,
   sentimentReport: Annotation<string>,
   newsReport: Annotation<string>,
   fundamentalsReport: Annotation<string>,
+  // FIX #2: tách bull/bear report riêng để truyền đúng vào researchManager
+  bullReport: Annotation<string>,
+  bearReport: Annotation<string>,
   debateHistory: Annotation<string>,
   debateCount: Annotation<number>,
+  // Plans
   investmentPlan: Annotation<string>,
   traderPlan: Annotation<string>,
-  riskHistory: Annotation<string>,
-  riskCount: Annotation<number>,
+  // FIX #1: lưu structured traderOutput để risk team dùng
+  traderOutput: Annotation<TraderOutput | null>,
+  // Risk team — FIX #3: mỗi analyst lưu riêng để song song hoá
+  aggressiveReport: Annotation<string>,
+  conservativeReport: Annotation<string>,
+  neutralReport: Annotation<string>,
+  // Final
   finalDecision: Annotation<string>,
   pastExperience: Annotation<string>,
-  messages: Annotation<unknown[]>,
 });
 
 type State = typeof State.State;
@@ -142,184 +135,305 @@ type State = typeof State.State;
 function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const memory = new LongTermMemoryManager();
 
+  // ---------- fetch ----------
   async function fetchData(s: State) {
-    // Nếu dataSnapshot đã có dữ liệu thực (closePrice > 0 hoặc ohlcHistory có data) thì skip
     if (s.dataSnapshot && (s.dataSnapshot.closePrice > 0 || s.dataSnapshot.ohlcHistory.length > 0)) {
       return {};
     }
-
     const ticker = s.ticker || "";
     const date = s.date || new Date().toISOString().split("T")[0]!;
-
     if (!ticker) {
       return {
-        ticker,
-        date,
+        ticker, date,
         dataSnapshot: {
           ticker, date, closePrice: 0, ohlcHistory: [], latestTrades: [],
           latestQuotes: {}, foreignTrading: {}, secDef: {}, instruments: {},
-          marketNews: "", socialSentiment: "", marketReport: "",
-          sentimentReport: "", newsReport: "", fundamentalsReport: "",
+          marketNews: "", socialSentiment: "",
+          marketReport: "", sentimentReport: "", newsReport: "", fundamentalsReport: "",
         },
       };
     }
-
     graphLogger.nodeStart("Fetch Data", ticker);
     const dataSnapshot = await buildDataSnapshot(ticker, date);
     graphLogger.nodeDone("Fetch Data", 0);
-
     return { ticker, date, dataSnapshot };
   }
 
+  // ---------- load ----------
   async function loadExperience(s: State) {
-    if (!s.ticker) {
+    if (!s.ticker) return { pastExperience: "" };
+    try {
+      const exps = memory.searchMemories(["trading", "experiences"], s.ticker);
+      const past = exps.length > 0
+        ? `Kinh nghiệm: ${exps.map((e: any) => `${e.date}: ${e.lesson}`).join("; ")}`
+        : "";
+      return { pastExperience: past };
+    } catch (err) {
+      console.warn(`[loadExperience] ${err}`);
       return { pastExperience: "" };
     }
-    const exps = memory.searchMemories(["trading", "experiences"], s.ticker);
-    const past = exps.length > 0
-      ? `Kinh nghiệm: ${exps.map((e: any) => `${e.date}: ${e.lesson}`).join("; ")}`
-      : "";
-    return { pastExperience: past };
   }
 
+  // ---------- 4 analysts (song song) ----------
   async function marketAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Market Analyst", s.ticker);
-    const r = await runMarketAnalyst(llm, s.dataSnapshot!);
-    const summary = r.summary || JSON.stringify(r);
-    logNodeResult("Market Analyst", summary);
-    graphLogger.nodeDone("Market Analyst", Date.now() - start);
-    return { marketReport: summary };
+    try {
+      const r = await runMarketAnalyst(llm, s.dataSnapshot!);
+      const summary = r.summary || JSON.stringify(r);
+      logNodeResult("Market Analyst", summary);
+      graphLogger.nodeDone("Market Analyst", Date.now() - start);
+      return { marketReport: summary };
+    } catch (err) {
+      console.error(`[marketAnalyst] ${err}`);
+      return { marketReport: `Lỗi phân tích: ${err}` };
+    }
   }
 
   async function sentimentAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Sentiment Analyst", s.ticker);
-    const r = await runSocialAnalyst(llm, s.dataSnapshot!);
-    const summary = r.summary || JSON.stringify(r);
-    logNodeResult("Sentiment Analyst", summary);
-    graphLogger.nodeDone("Sentiment Analyst", Date.now() - start);
-    return { sentimentReport: summary };
+    try {
+      const r = await runSocialAnalyst(llm, s.dataSnapshot!);
+      const summary = r.summary || JSON.stringify(r);
+      logNodeResult("Sentiment Analyst", summary);
+      graphLogger.nodeDone("Sentiment Analyst", Date.now() - start);
+      return { sentimentReport: summary };
+    } catch (err) {
+      console.error(`[sentimentAnalyst] ${err}`);
+      return { sentimentReport: `Lỗi phân tích: ${err}` };
+    }
   }
 
   async function newsAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("News Analyst", s.ticker);
-    const r = await runNewsAnalyst(llm, s.dataSnapshot!);
-    const summary = r.summary || JSON.stringify(r);
-    logNodeResult("News Analyst", summary);
-    graphLogger.nodeDone("News Analyst", Date.now() - start);
-    return { newsReport: summary };
+    try {
+      const r = await runNewsAnalyst(llm, s.dataSnapshot!);
+      const summary = r.summary || JSON.stringify(r);
+      logNodeResult("News Analyst", summary);
+      graphLogger.nodeDone("News Analyst", Date.now() - start);
+      return { newsReport: summary };
+    } catch (err) {
+      console.error(`[newsAnalyst] ${err}`);
+      return { newsReport: `Lỗi phân tích: ${err}` };
+    }
   }
 
   async function fundamentalsAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Fundamentals Analyst", s.ticker);
-    const r = await runFundamentalsAnalyst(llm, s.dataSnapshot!);
-    const summary = r.summary || JSON.stringify(r);
-    logNodeResult("Fundamentals Analyst", summary);
-    graphLogger.nodeDone("Fundamentals Analyst", Date.now() - start);
-    return { fundamentalsReport: summary };
+    try {
+      const r = await runFundamentalsAnalyst(llm, s.dataSnapshot!);
+      const summary = r.summary || JSON.stringify(r);
+      logNodeResult("Fundamentals Analyst", summary);
+      graphLogger.nodeDone("Fundamentals Analyst", Date.now() - start);
+      return { fundamentalsReport: summary };
+    } catch (err) {
+      console.error(`[fundamentalsAnalyst] ${err}`);
+      return { fundamentalsReport: `Lỗi phân tích: ${err}` };
+    }
   }
 
+  // ---------- debate ----------
   async function bullResearcher(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Bull Researcher", `round ${s.debateCount + 1}`);
-    const r = await runBullResearcher(llm,
-      { summary: s.marketReport || "" }, { summary: s.newsReport || "" },
-      { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
-      s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
-    );
-    logNodeResult("Bull Researcher", r.argument);
-    graphLogger.nodeDone("Bull Researcher", Date.now() - start);
-    return {
-      debateHistory: (s.debateHistory || "") + "\nBull: " + r.argument,
-      debateCount: s.debateCount + 1,
-    };
+    try {
+      const r = await runBullResearcher(
+        llm,
+        { summary: s.marketReport || "" }, { summary: s.newsReport || "" },
+        { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
+        s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
+      );
+      logNodeResult("Bull Researcher", r.argument);
+      graphLogger.nodeDone("Bull Researcher", Date.now() - start);
+      return {
+        bullReport: r.argument,
+        debateHistory: (s.debateHistory || "") + "\nBull: " + r.argument,
+        debateCount: (s.debateCount || 0) + 1,
+      };
+    } catch (err) {
+      console.error(`[bullResearcher] ${err}`);
+      return { bullReport: `Lỗi: ${err}`, debateCount: (s.debateCount || 0) + 1 };
+    }
   }
 
   async function bearResearcher(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Bear Researcher", `round ${s.debateCount + 1}`);
-    const r = await runBearResearcher(llm,
-      { summary: s.marketReport || "" }, { summary: s.newsReport || "" },
-      { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
-      s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
-    );
-    logNodeResult("Bear Researcher", r.argument);
-    graphLogger.nodeDone("Bear Researcher", Date.now() - start);
-    return {
-      debateHistory: (s.debateHistory || "") + "\nBear: " + r.argument,
-      debateCount: s.debateCount + 1,
-    };
+    try {
+      const r = await runBearResearcher(
+        llm,
+        { summary: s.marketReport || "" }, { summary: s.newsReport || "" },
+        { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
+        s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
+      );
+      logNodeResult("Bear Researcher", r.argument);
+      graphLogger.nodeDone("Bear Researcher", Date.now() - start);
+      return {
+        bearReport: r.argument,
+        debateHistory: (s.debateHistory || "") + "\nBear: " + r.argument,
+        debateCount: (s.debateCount || 0) + 1,
+      };
+    } catch (err) {
+      console.error(`[bearResearcher] ${err}`);
+      return { bearReport: `Lỗi: ${err}`, debateCount: (s.debateCount || 0) + 1 };
+    }
   }
 
+  // FIX #4: conditional edge function cho debate loop
+  function shouldContinueDebate(s: State): "bull" | "manager" {
+    // debateCount tăng mỗi lần bull hoặc bear chạy → 1 round = 2 increments
+    const rounds = Math.floor((s.debateCount || 0) / 2);
+    return rounds < MAX_DEBATE_ROUNDS ? "bull" : "manager";
+  }
+
+  // ---------- manager ----------
   async function researchManager(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Research Manager");
-    const r = await runResearchManager(deepLlm,
-      { summary: s.debateHistory } as any,
-      { summary: s.debateHistory } as any,
-      s.debateHistory ? s.debateHistory.split("\n") : [],
-      s.dataSnapshot!
-    );
-    const plan = `Rating: ${r.decision} | Confidence: ${r.confidence} | ${r.reasoning}`;
-    logNodeResult("Research Manager", plan);
-    graphLogger.nodeDone("Research Manager", Date.now() - start);
-    return { investmentPlan: plan };
+    try {
+      // FIX #2: truyền bullReport và bearReport riêng biệt
+      const r = await runResearchManager(
+        deepLlm,
+        { summary: s.bullReport || s.debateHistory || "" } as any,
+        { summary: s.bearReport || s.debateHistory || "" } as any,
+        s.debateHistory ? s.debateHistory.split("\n") : [],
+        s.dataSnapshot!
+      );
+      const plan = `Rating: ${r.decision} | Confidence: ${r.confidence} | ${r.reasoning}`;
+      logNodeResult("Research Manager", plan);
+      graphLogger.nodeDone("Research Manager", Date.now() - start);
+      return { investmentPlan: plan };
+    } catch (err) {
+      console.error(`[researchManager] ${err}`);
+      return { investmentPlan: `Lỗi: ${err}` };
+    }
   }
 
+  // ---------- trader ----------
   async function trader(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Trader");
-    const r = await runTrader(llm, {
-      action: "hold", ticker: s.ticker, confidence: 0.5,
-      targetPrice: 0, stopLoss: 0, positionSize: "", timeframe: "", reasoning: s.investmentPlan
-    } as any, s.dataSnapshot!);
-    const plan = `${r.action} ${r.ticker} | Target: ${r.targetPrice} | SL: ${r.stopLoss}`;
-    logNodeResult("Trader", plan);
-    graphLogger.nodeDone("Trader", Date.now() - start);
-    return { traderPlan: plan };
+    try {
+      // Truyền investmentPlan thật vào reasoning
+      const r = await runTrader(llm, {
+        action: "hold", ticker: s.ticker, confidence: 0.5,
+        targetPrice: 0, stopLoss: 0, positionSize: "", timeframe: "",
+        reasoning: s.investmentPlan || "",
+      } as any, s.dataSnapshot!);
+      const plan = `${r.action} ${r.ticker} | Target: ${r.targetPrice} | SL: ${r.stopLoss} | Confidence: ${r.confidence}`;
+      logNodeResult("Trader", plan);
+      graphLogger.nodeDone("Trader", Date.now() - start);
+      // FIX #1: lưu cả structured output để risk team dùng
+      return { traderPlan: plan, traderOutput: r };
+    } catch (err) {
+      console.error(`[trader] ${err}`);
+      const fallback: TraderOutput = {
+        action: "hold", ticker: s.ticker, confidence: 0,
+        targetPrice: 0, stopLoss: 0, positionSize: "N/A",
+        timeframe: "N/A", reasoning: `Lỗi: ${err}`,
+      };
+      return { traderPlan: `Lỗi: ${err}`, traderOutput: fallback };
+    }
   }
+
+  // ---------- risk team (song song) — FIX #1 + #3 ----------
+
+  function getTraderOutput(s: State): TraderOutput {
+    // FIX #1: dùng traderOutput thật thay vì hardcode "hold"
+    return s.traderOutput || {
+      action: "hold", ticker: s.ticker, confidence: 0.5,
+      targetPrice: 0, stopLoss: 0, positionSize: "", timeframe: "",
+      reasoning: s.investmentPlan || "",
+    };
+  }
+
+  const emptyRiskState: RiskDebateState = {
+    history: "", aggressiveHistory: "", conservativeHistory: "", neutralHistory: "",
+    latestSpeaker: null, currentAggressiveResponse: "",
+    currentConservativeResponse: "", currentNeutralResponse: "", count: 0,
+  };
 
   async function aggressiveAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Aggressive Risk");
-    const r = await runAggressiveAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
-    logNodeResult("Aggressive Risk", r);
-    graphLogger.nodeDone("Aggressive Risk", Date.now() - start);
-    return { riskHistory: (s.riskHistory || "") + "\nAggressive: " + r, riskCount: s.riskCount + 1 };
+    try {
+      const r = await runAggressiveAnalyst(llm, getTraderOutput(s), s.dataSnapshot!, emptyRiskState);
+      logNodeResult("Aggressive Risk", r);
+      graphLogger.nodeDone("Aggressive Risk", Date.now() - start);
+      return { aggressiveReport: r };
+    } catch (err) {
+      console.error(`[aggressiveAnalyst] ${err}`);
+      return { aggressiveReport: `Lỗi: ${err}` };
+    }
   }
 
   async function conservativeAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Conservative Risk");
-    const r = await runConservativeAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
-    logNodeResult("Conservative Risk", r);
-    graphLogger.nodeDone("Conservative Risk", Date.now() - start);
-    return { riskHistory: (s.riskHistory || "") + "\nConservative: " + r, riskCount: s.riskCount + 1 };
+    try {
+      const r = await runConservativeAnalyst(llm, getTraderOutput(s), s.dataSnapshot!, emptyRiskState);
+      logNodeResult("Conservative Risk", r);
+      graphLogger.nodeDone("Conservative Risk", Date.now() - start);
+      return { conservativeReport: r };
+    } catch (err) {
+      console.error(`[conservativeAnalyst] ${err}`);
+      return { conservativeReport: `Lỗi: ${err}` };
+    }
   }
 
   async function neutralAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Neutral Risk");
-    const r = await runNeutralAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
-    logNodeResult("Neutral Risk", r);
-    graphLogger.nodeDone("Neutral Risk", Date.now() - start);
-    return { riskHistory: (s.riskHistory || "") + "\nNeutral: " + r, riskCount: s.riskCount + 1 };
+    try {
+      const r = await runNeutralAnalyst(llm, getTraderOutput(s), s.dataSnapshot!, emptyRiskState);
+      logNodeResult("Neutral Risk", r);
+      graphLogger.nodeDone("Neutral Risk", Date.now() - start);
+      return { neutralReport: r };
+    } catch (err) {
+      console.error(`[neutralAnalyst] ${err}`);
+      return { neutralReport: `Lỗi: ${err}` };
+    }
   }
 
+  // ---------- portfolio ----------
   async function portfolioManager(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Portfolio Manager");
-    const r = await runPortfolioManager(deepLlm, { action: "hold", ticker: s.ticker } as any, { history: s.riskHistory } as any, s.dataSnapshot!);
-    const decision = `${r.finalDecision} | ${r.action} | ${r.reasoning}`;
-    logNodeResult("Portfolio Manager", decision);
-    await memory.saveEpisodicMemory(["trading", "experiences"], `${s.ticker}-${s.date}`, {
-      ticker: s.ticker, date: s.date, event: "Analysis", outcome: decision, lesson: ""
-    });
-    graphLogger.nodeDone("Portfolio Manager", Date.now() - start);
-    return { finalDecision: decision };
+    try {
+      // FIX #1: dùng traderOutput thật; FIX #3: dùng reports riêng từ 3 analyst song song
+      const riskState: RiskDebateState = {
+        ...emptyRiskState,
+        history: [s.aggressiveReport, s.conservativeReport, s.neutralReport]
+          .filter(Boolean).join("\n\n"),
+        aggressiveHistory: s.aggressiveReport || "",
+        conservativeHistory: s.conservativeReport || "",
+        neutralHistory: s.neutralReport || "",
+        currentAggressiveResponse: s.aggressiveReport || "",
+        currentConservativeResponse: s.conservativeReport || "",
+        currentNeutralResponse: s.neutralReport || "",
+      };
+      const r = await runPortfolioManager(
+        deepLlm,
+        getTraderOutput(s),
+        riskState,
+        s.dataSnapshot!,
+        s.investmentPlan,
+        s.pastExperience
+      );
+      const decision = `${r.finalDecision} | ${r.action} | ${r.reasoning}`;
+      logNodeResult("Portfolio Manager", decision);
+      await memory.saveEpisodicMemory(["trading", "experiences"], `${s.ticker}-${s.date}`, {
+        ticker: s.ticker, date: s.date, event: "Analysis", outcome: decision, lesson: "",
+      });
+      graphLogger.nodeDone("Portfolio Manager", Date.now() - start);
+      return { finalDecision: decision };
+    } catch (err) {
+      console.error(`[portfolioManager] ${err}`);
+      return { finalDecision: `Lỗi Portfolio Manager: ${err}` };
+    }
   }
 
   async function saveExperience(s: State) {
@@ -327,9 +441,10 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   return {
-    fetchData, loadExperience, marketAnalyst, sentimentAnalyst, newsAnalyst, fundamentalsAnalyst,
-    bullResearcher, bearResearcher, researchManager, trader,
-    aggressiveAnalyst, conservativeAnalyst, neutralAnalyst,
+    fetchData, loadExperience,
+    marketAnalyst, sentimentAnalyst, newsAnalyst, fundamentalsAnalyst,
+    bullResearcher, bearResearcher, shouldContinueDebate, researchManager,
+    trader, aggressiveAnalyst, conservativeAnalyst, neutralAnalyst,
     portfolioManager, saveExperience,
   };
 }
@@ -338,9 +453,8 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
 export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const n = createNodes(llm, deepLlm);
-  const R = 1; // Số round debate
+
   return new StateGraph(State)
-    // Nodes
     .addNode("fetch", n.fetchData)
     .addNode("load", n.loadExperience)
     .addNode("market", n.marketAnalyst)
@@ -351,71 +465,73 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addNode("bear", n.bearResearcher)
     .addNode("manager", n.researchManager)
     .addNode("trader", n.trader)
+    // FIX #3: risk team song song
     .addNode("aggressive", n.aggressiveAnalyst)
     .addNode("conservative", n.conservativeAnalyst)
     .addNode("neutral", n.neutralAnalyst)
     .addNode("portfolio", n.portfolioManager)
     .addNode("save", n.saveExperience)
-    // Flow: fetch → load → 4 analysts chạy SONG SONG (fan-out)
+    // fetch → load → 4 analysts song song
     .addEdge(START, "fetch")
     .addEdge("fetch", "load")
     .addEdge("load", "market")
     .addEdge("load", "sentiment")
     .addEdge("load", "news")
     .addEdge("load", "fundamentals")
-    // Fan-in: "bull" chỉ chạy khi cả 4 analyst xong
+    // fan-in 4 analysts → bull
     .addEdge("market", "bull")
     .addEdge("sentiment", "bull")
     .addEdge("news", "bull")
     .addEdge("fundamentals", "bull")
-    // Debate loop: bull → bear → (repeat R times) → manager
+    // bull → bear → FIX #4: conditional loop
     .addEdge("bull", "bear")
-    .addEdge("bear", R > 1 ? "bull" : "manager")
-    // Manager → Trader → Risk
+    .addConditionalEdges("bear", n.shouldContinueDebate, { bull: "bull", manager: "manager" })
+    // manager → trader → risk team (3 song song) → portfolio
     .addEdge("manager", "trader")
     .addEdge("trader", "aggressive")
-    .addEdge("aggressive", "conservative")
-    .addEdge("conservative", "neutral")
+    .addEdge("trader", "conservative")
+    .addEdge("trader", "neutral")
+    // fan-in 3 risk analysts → portfolio
+    .addEdge("aggressive", "portfolio")
+    .addEdge("conservative", "portfolio")
     .addEdge("neutral", "portfolio")
-    // End
     .addEdge("portfolio", "save")
     .addEdge("save", END)
     .compile();
 }
+
 // ==================== ANALYZE ====================
 
 export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Promise<string> {
   logAnalysisStart(ticker);
 
-  // Tạo deepLlm với cùng config với llm
   const deepLlm = new ChatOpenAI({
     model: process.env.DEEP_MODEL || "nvidia/deepseek-ai/deepseek-v4-pro",
     apiKey: process.env.LLM_API_KEY,
     temperature: 0.3,
-    configuration: {
-      baseURL: process.env.LLM_BASE_URL || "http://localhost:20128/v1",
-    },
+    configuration: { baseURL: process.env.LLM_BASE_URL || "http://localhost:20128/v1" },
   });
+
   const graph = buildTradingGraph(llm, deepLlm);
 
   logAnalysisStep(1, 7, "Load Past Experience");
   logAnalysisStep(2, 7, "4 Analysts (Market, Sentiment, News, Fundamentals)");
-  logAnalysisStep(3, 7, "Bull/Bear Debate");
+  logAnalysisStep(3, 7, `Bull/Bear Debate (${MAX_DEBATE_ROUNDS} rounds)`);
   logAnalysisStep(4, 7, "Research Manager");
   logAnalysisStep(5, 7, "Trader");
-  logAnalysisStep(6, 7, "Risk Team (Aggressive, Conservative, Neutral)");
+  logAnalysisStep(6, 7, "Risk Team (Aggressive, Conservative, Neutral) — song song");
   logAnalysisStep(7, 7, "Portfolio Manager");
-
   console.log("\n");
 
   const result = await graph.invoke({
     ticker, date,
     dataSnapshot: await buildDataSnapshot(ticker, date),
     marketReport: "", sentimentReport: "", newsReport: "", fundamentalsReport: "",
+    bullReport: "", bearReport: "",
     debateHistory: "", debateCount: 0,
-    investmentPlan: "", traderPlan: "",
-    riskHistory: "", riskCount: 0,
-    finalDecision: "", pastExperience: "", messages: [],
+    investmentPlan: "", traderPlan: "", traderOutput: null,
+    aggressiveReport: "", conservativeReport: "", neutralReport: "",
+    finalDecision: "", pastExperience: "",
   });
 
   return result.finalDecision || "Không có kết quả";
