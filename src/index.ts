@@ -2,7 +2,6 @@ import "dotenv/config";
 import { ChatOpenAI } from "@langchain/openai";
 import { DynamicTool } from "@langchain/core/tools";
 import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { analyze } from "./graph/trading-graph";
 import { SYSTEM_PROMPT } from "./prompts";
 import { LLMManager, getAllModels, getModelsByProvider, type LLMProvider } from "./llm/index";
@@ -21,13 +20,6 @@ const llmManager = new LLMManager({
 
 const memoryManager = new MemoryManager(".memory");
 
-// ==================== CHECKPOINT SETUP ====================
-
-async function setupCheckpoint() {
-  const checkpointer = await SqliteSaver.fromConnString("file:checkpoints.db");
-  return checkpointer;
-}
-
 // ==================== MAIN ====================
 
 async function main() {
@@ -35,9 +27,6 @@ async function main() {
 
   const allTools = createAllTools();
   console.log(`Đã tải ${allTools.length} tools: ${allTools.map((t) => t.name).join(", ")}`);
-
-  const checkpointer = await setupCheckpoint();
-  console.log("Đã khởi tạo checkpoint.");
 
   const currentModels = llmManager.getCurrentModels();
   console.log(`\n[LLM] Quick model: ${currentModels.quick}`);
@@ -219,4 +208,7 @@ async function main() {
   rl.close();
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error("Lỗi nghiêm trọng:", error);
+  process.exit(1);
+});

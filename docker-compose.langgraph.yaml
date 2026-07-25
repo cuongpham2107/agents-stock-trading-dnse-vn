@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  langgraph-api:
+    image: langchain/langgraph-api:latest
+    ports:
+      - "2024:2024"
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY}
+    command: >
+      sh -c "pip install -r requirements.txt && langgraph dev --host 0.0.0.0 --port 2024"

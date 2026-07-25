@@ -5,14 +5,12 @@
   "private": true,
   "scripts": {
     "start": "bun run src/index.ts",
-    "start:mcp": "bun run src/mcp/index.ts",
-    "start:agent": "bun run src/agent/index.ts",
+    "studio": "npx @langchain/langgraph-cli dev",
     "start:all": "bun run start.ts",
-    "start:firecrawl": "bun run start.ts --firecrawl",
-    "start:docker": "bun run start.ts --docker",
     "dev": "bun --watch run src/index.ts"
   },
   "devDependencies": {
+    "@langchain/langgraph-cli": "^1.4.3",
     "@types/bun": "latest",
     "@types/node": "^22.0.0",
     "typescript": "^7.0.2"

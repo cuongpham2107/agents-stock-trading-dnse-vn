@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "trading-agent": "./src/graph/studio-graph.ts:graph"
+  },
+  "env": ".env"
+}

@@ -202,13 +202,22 @@ export function createGetMarketWorkingDatesTool(): DynamicTool {
 export function createGetForeignTradingTool(): DynamicTool {
   return new DynamicTool({
     name: "get_foreign_trading",
-    description: "Truy vấn dữ liệu giao dịch của nhà đầu tư nước ngoài. Input: JSON string với symbol (required), from, to (required), boardId (optional), limit (optional).",
+    description: "Truy vấn dữ liệu giao dịch của nhà đầu tư nước ngoài. Input: JSON string với symbol (required), from, to (required - Unix timestamp), boardId (optional), limit (optional). Ví dụ: {\"symbol\":\"HPG\",\"from\":1704067200,\"to\":1704153600}",
     func: async (input: string) => {
       try {
         const args = JSON.parse(input);
         const { symbol, from, to, boardId, limit } = args;
+
+        // Chuyển đổi date string thành timestamp nếu cần
+        const fromDate = typeof from === "string" && !from.match(/^\d+$/)
+          ? Math.floor(new Date(from).getTime() / 1000).toString()
+          : from;
+        const toDate = typeof to === "string" && !to.match(/^\d+$/)
+          ? Math.floor(new Date(to).getTime() / 1000).toString()
+          : to;
+
         const path = `/price/${symbol}/foreign-trading`;
-        const params = new URLSearchParams({ from, to });
+        const params = new URLSearchParams({ from: fromDate, to: toDate });
         if (boardId) params.append("boardId", boardId);
         if (limit) params.append("limit", limit.toString());
         const url = `${API_BASE_URL}${path}?${params.toString()}`;

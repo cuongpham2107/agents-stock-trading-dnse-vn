@@ -137,36 +137,36 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   // Node: Market Analyst
-  async function marketAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
+  async function marketAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy Market Analyst...");
-    const result = await runMarketAnalyst(llm, state.snapshot);
+    const result = await runMarketAnalyst(llm, state.dataSnapshot!);
     return {
       marketReport: result.summary || JSON.stringify(result),
     };
   }
 
   // Node: Sentiment Analyst
-  async function sentimentAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
+  async function sentimentAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy Sentiment Analyst...");
-    const result = await runSocialAnalyst(llm, state.snapshot);
+    const result = await runSocialAnalyst(llm, state.dataSnapshot!);
     return {
       sentimentReport: result.summary || JSON.stringify(result),
     };
   }
 
   // Node: News Analyst
-  async function newsAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
+  async function newsAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy News Analyst...");
-    const result = await runNewsAnalyst(llm, state.snapshot);
+    const result = await runNewsAnalyst(llm, state.dataSnapshot!);
     return {
       newsReport: result.summary || JSON.stringify(result),
     };
   }
 
   // Node: Fundamentals Analyst
-  async function fundamentalsAnalyst(state: { ticker: string; snapshot: DataSnapshot }) {
+  async function fundamentalsAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy Fundamentals Analyst...");
-    const result = await runFundamentalsAnalyst(llm, state.snapshot);
+    const result = await runFundamentalsAnalyst(llm, state.dataSnapshot!);
     return {
       fundamentalsReport: result.summary || JSON.stringify(result),
     };
@@ -185,13 +185,15 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   // Node: Bull Researcher
   async function bullResearcher(state: TradingState) {
     console.log("[Graph] Đang chạy Bull Researcher...");
-    const snapshot = state.dataSnapshot!;
+    console.log("[Graph] State keys:", Object.keys(state));
+    console.log("[Graph] investmentDebateState:", state.investmentDebateState);
     const debateState = state.investmentDebateState;
 
-    const marketReport = JSON.parse(state.marketReport || "{}");
-    const newsReport = JSON.parse(state.newsReport || "{}");
-    const sentimentReport = JSON.parse(state.sentimentReport || "{}");
-    const fundamentalsReport = JSON.parse(state.fundamentalsReport || "{}");
+    // Tạo report objects với summary
+    const marketReport = { summary: state.marketReport || "" };
+    const newsReport = { summary: state.newsReport || "" };
+    const sentimentReport = { summary: state.sentimentReport || "" };
+    const fundamentalsReport = { summary: state.fundamentalsReport || "" };
 
     const bullReport = await runBullResearcher(
       llm,
@@ -218,13 +220,13 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   // Node: Bear Researcher
   async function bearResearcher(state: TradingState) {
     console.log("[Graph] Đang chạy Bear Researcher...");
-    const snapshot = state.dataSnapshot!;
     const debateState = state.investmentDebateState;
 
-    const marketReport = JSON.parse(state.marketReport || "{}");
-    const newsReport = JSON.parse(state.newsReport || "{}");
-    const sentimentReport = JSON.parse(state.sentimentReport || "{}");
-    const fundamentalsReport = JSON.parse(state.fundamentalsReport || "{}");
+    // Tạo report objects với summary
+    const marketReport = { summary: state.marketReport || "" };
+    const newsReport = { summary: state.newsReport || "" };
+    const sentimentReport = { summary: state.sentimentReport || "" };
+    const fundamentalsReport = { summary: state.fundamentalsReport || "" };
 
     const bearReport = await runBearResearcher(
       llm,
@@ -315,49 +317,58 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   // Node: Aggressive Analyst
-  async function aggressiveAnalyst(state: { snapshot: DataSnapshot; riskState: RiskDebateState; traderDecision: any }) {
+  async function aggressiveAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy Aggressive Risk Analyst...");
-    const response = await runAggressiveAnalyst(llm, state.traderDecision, state.snapshot, state.riskState);
+    const snapshot = state.dataSnapshot!;
+    const riskState = state.riskDebateState;
+    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
+    const response = await runAggressiveAnalyst(llm, traderDecision, snapshot, riskState);
     return {
       riskDebateState: {
-        ...state.riskState,
-        history: state.riskState.history + "\n" + response,
-        aggressiveHistory: state.riskState.aggressiveHistory + "\n" + response,
+        ...riskState,
+        history: riskState.history + "\n" + response,
+        aggressiveHistory: riskState.aggressiveHistory + "\n" + response,
         latestSpeaker: "Aggressive" as const,
         currentAggressiveResponse: response,
-        count: state.riskState.count + 1,
+        count: riskState.count + 1,
       },
     };
   }
 
   // Node: Conservative Analyst
-  async function conservativeAnalyst(state: { snapshot: DataSnapshot; riskState: RiskDebateState; traderDecision: any }) {
+  async function conservativeAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy Conservative Risk Analyst...");
-    const response = await runConservativeAnalyst(llm, state.traderDecision, state.snapshot, state.riskState);
+    const snapshot = state.dataSnapshot!;
+    const riskState = state.riskDebateState;
+    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
+    const response = await runConservativeAnalyst(llm, traderDecision, snapshot, riskState);
     return {
       riskDebateState: {
-        ...state.riskState,
-        history: state.riskState.history + "\n" + response,
-        conservativeHistory: state.riskState.conservativeHistory + "\n" + response,
+        ...riskState,
+        history: riskState.history + "\n" + response,
+        conservativeHistory: riskState.conservativeHistory + "\n" + response,
         latestSpeaker: "Conservative" as const,
         currentConservativeResponse: response,
-        count: state.riskState.count + 1,
+        count: riskState.count + 1,
       },
     };
   }
 
   // Node: Neutral Analyst
-  async function neutralAnalyst(state: { snapshot: DataSnapshot; riskState: RiskDebateState; traderDecision: any }) {
+  async function neutralAnalyst(state: TradingState) {
     console.log("[Graph] Đang chạy Neutral Risk Analyst...");
-    const response = await runNeutralAnalyst(llm, state.traderDecision, state.snapshot, state.riskState);
+    const snapshot = state.dataSnapshot!;
+    const riskState = state.riskDebateState;
+    const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}");
+    const response = await runNeutralAnalyst(llm, traderDecision, snapshot, riskState);
     return {
       riskDebateState: {
-        ...state.riskState,
-        history: state.riskState.history + "\n" + response,
-        neutralHistory: state.riskState.neutralHistory + "\n" + response,
+        ...riskState,
+        history: riskState.history + "\n" + response,
+        neutralHistory: riskState.neutralHistory + "\n" + response,
         latestSpeaker: "Neutral" as const,
         currentNeutralResponse: response,
-        count: state.riskState.count + 1,
+        count: riskState.count + 1,
       },
     };
   }
@@ -436,10 +447,19 @@ function createGraphNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
 function shouldContinueDebate(state: TradingState): string {
   const maxRounds = 2;
-  if (state.investmentDebateState.count >= maxRounds * 2) {
-    return "Research Manager";
+  const count = state.investmentDebateState?.count ?? 0;
+
+  console.log(`[Debate] Round ${count}, max: ${maxRounds * 2}, count % 2 = ${count % 2}`);
+
+  let destination: string;
+  if (count >= maxRounds * 2) {
+    destination = "Research Manager";
+  } else {
+    destination = count % 2 === 0 ? "Bear Researcher" : "Bull Researcher";
   }
-  return state.investmentDebateState.count % 2 === 0 ? "Bear Researcher" : "Bull Researcher";
+
+  console.log(`[Debate] Destination: "${destination}"`);
+  return destination;
 }
 
 function shouldRetry(state: TradingState): string {
@@ -460,8 +480,7 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addNode("Load Past Experience", nodes.loadPastExperience)
     .addNode("Save Experience", nodes.saveCurrentExperience)
 
-    // Analysts (Parallel with Send API)
-    .addNode("Run Analysts", nodes.runAnalystsParallel)
+    // Analysts (Sequential)
     .addNode("Market Analyst", nodes.marketAnalyst)
     .addNode("Sentiment Analyst", nodes.sentimentAnalyst)
     .addNode("News Analyst", nodes.newsAnalyst)
@@ -476,8 +495,7 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     // Trader
     .addNode("Trader", nodes.trader)
 
-    // Risk Team (Parallel with Send API)
-    .addNode("Run Risk Team", nodes.runRiskTeamParallel)
+    // Risk Team (Sequential)
     .addNode("Aggressive Analyst", nodes.aggressiveAnalyst)
     .addNode("Conservative Analyst", nodes.conservativeAnalyst)
     .addNode("Neutral Analyst", nodes.neutralAnalyst)
@@ -486,21 +504,16 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     // Portfolio Manager
     .addNode("Portfolio Manager", nodes.portfolioManager)
 
-    // Error Handler
-    .addNode("Error Handler", nodes.errorHandler)
-
     // ===== EDGES =====
 
     // Start → Load Past Experience
     .addEdge(START, "Load Past Experience")
 
-    // Load Past Experience → Parallel Analysts
-    .addEdge("Load Past Experience", "Run Analysts")
-
-    // Parallel Analysts → Individual Analysts (Send API)
-    .addEdge("Market Analyst", "Aggregate Reports")
-    .addEdge("Sentiment Analyst", "Aggregate Reports")
-    .addEdge("News Analyst", "Aggregate Reports")
+    // Load Past Experience → Analysts (Sequential)
+    .addEdge("Load Past Experience", "Market Analyst")
+    .addEdge("Market Analyst", "Sentiment Analyst")
+    .addEdge("Sentiment Analyst", "News Analyst")
+    .addEdge("News Analyst", "Fundamentals Analyst")
     .addEdge("Fundamentals Analyst", "Aggregate Reports")
 
     // Aggregate → Bull Researcher
@@ -519,12 +532,10 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     // Research Manager → Trader
     .addEdge("Research Manager", "Trader")
 
-    // Trader → Parallel Risk Team
-    .addEdge("Trader", "Run Risk Team")
-
-    // Parallel Risk Team → Individual Analysts (Send API)
-    .addEdge("Aggressive Analyst", "Aggregate Risk Reports")
-    .addEdge("Conservative Analyst", "Aggregate Risk Reports")
+    // Trader → Risk Team (Sequential)
+    .addEdge("Trader", "Aggressive Analyst")
+    .addEdge("Aggressive Analyst", "Conservative Analyst")
+    .addEdge("Conservative Analyst", "Neutral Analyst")
     .addEdge("Neutral Analyst", "Aggregate Risk Reports")
 
     // Aggregate Risk → Portfolio Manager

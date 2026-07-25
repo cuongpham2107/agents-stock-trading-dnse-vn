@@ -123,17 +123,28 @@ export function createConfigFromPreset(
   apiKey?: string
 ): LLMConfig {
   const preset = getModelByName(presetName);
-  if (!preset) {
-    throw new Error(`Model preset not found: ${presetName}`);
+
+  // Nếu tìm thấy preset, dùng preset
+  if (preset) {
+    const providerConfig = getProviderConfig(preset.provider);
+    return {
+      provider: preset.provider,
+      model: preset.model,
+      apiKey: apiKey || process.env.LLM_API_KEY,
+      baseUrl: preset.baseUrl || providerConfig.defaultBaseUrl,
+      temperature: 0.7,
+    };
   }
 
-  const providerConfig = getProviderConfig(preset.provider);
+  // Nếu không tìm thấy, tạo config trực tiếp với model name
+  // Giả định là OpenAI-compatible (OpenRouter, 9Router, etc.)
+  console.log(`[LLM] Không tìm thấy preset "${presetName}", dùng trực tiếp như model name`);
 
   return {
-    provider: preset.provider,
-    model: preset.model,
+    provider: "openai",
+    model: presetName,
     apiKey: apiKey || process.env.LLM_API_KEY,
-    baseUrl: preset.baseUrl || providerConfig.defaultBaseUrl,
+    baseUrl: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
     temperature: 0.7,
   };
 }

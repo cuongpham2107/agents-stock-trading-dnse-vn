@@ -1,6 +1,9 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
-import type { MarketAnalystOutput, NewsAnalystOutput, SocialAnalystOutput, FundamentalsAnalystOutput, BullResearcherOutput } from "../../types/index.ts";
+import type { BullResearcherOutput } from "../../types/index.ts";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ReportInput = { summary?: string; [key: string]: any };
 
 const BULL_RESEARCHER_PROMPT = `Bạn là Bull Researcher - chuyên đưa ra luận điểm MUA BULLISH cho mã chứng khoán {ticker}.
 
@@ -24,21 +27,14 @@ NẾU CÓ DEBATE HISTORY (từ các round trước):
 
 Hãy đưa ra luận điểm bullish mạnh mẽ, dựa trên dữ liệu thực tế.
 
-OUTPUT FORMAT (JSON):
-{
-  "argument": "Luận điểm bullish chính",
-  "evidence": ["Bằng chứng 1", "Bằng chứng 2"],
-  "confidence": 0.75,
-  "counterArguments": ["Phản biện từ bear (nếu có)"],
-  "summary": "Tóm tắt luận điểm bull"
-}`;
+OUTPUT: Trả về JSON với các field: argument, evidence (array), confidence (number), counterArguments (array), summary.`;
 
 export async function runBullResearcher(
   llm: ChatOpenAI,
-  marketReport: MarketAnalystOutput,
-  newsReport: NewsAnalystOutput,
-  socialReport: SocialAnalystOutput,
-  fundamentalsReport: FundamentalsAnalystOutput,
+  marketReport: ReportInput,
+  newsReport: ReportInput,
+  socialReport: ReportInput,
+  fundamentalsReport: ReportInput,
   ticker: string,
   debateHistory: string[] = []
 ): Promise<BullResearcherOutput> {

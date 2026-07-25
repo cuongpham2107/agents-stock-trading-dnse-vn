@@ -107,7 +107,12 @@ export function getAllModels(): ModelPreset[] {
 }
 
 export function getModelByName(name: string): ModelPreset | undefined {
-  return getAllModels().find((m) => m.name.toLowerCase() === name.toLowerCase());
+  const nameLower = name.toLowerCase();
+  return getAllModels().find(
+    (m) =>
+      m.name.toLowerCase() === nameLower ||
+      m.model.toLowerCase() === nameLower
+  );
 }
 
 export function getModelsByTier(tier: "quick" | "deep"): ModelPreset[] {
