@@ -178,7 +178,6 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const n = createNodes(llm, deepLlm);
   const R = 1; // Số round debate
-
   return new StateGraph(State)
     // Nodes
     .addNode("load", n.loadExperience)
@@ -195,12 +194,16 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addNode("neutral", n.neutralAnalyst)
     .addNode("portfolio", n.portfolioManager)
     .addNode("save", n.saveExperience)
-    // Flow: analysts (sequential)
+    // Flow: 4 analysts chạy SONG SONG (fan-out từ "load")
     .addEdge(START, "load")
     .addEdge("load", "market")
-    .addEdge("market", "sentiment")
-    .addEdge("sentiment", "news")
-    .addEdge("news", "fundamentals")
+    .addEdge("load", "sentiment")
+    .addEdge("load", "news")
+    .addEdge("load", "fundamentals")
+    // Fan-in: "bull" chỉ chạy khi cả 4 analyst xong
+    .addEdge("market", "bull")
+    .addEdge("sentiment", "bull")
+    .addEdge("news", "bull")
     .addEdge("fundamentals", "bull")
     // Debate loop: bull → bear → (repeat R times) → manager
     .addEdge("bull", "bear")
@@ -216,7 +219,6 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addEdge("save", END)
     .compile();
 }
-
 // ==================== ANALYZE ====================
 
 export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Promise<string> {
