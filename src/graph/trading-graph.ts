@@ -13,8 +13,108 @@ import { runAggressiveAnalyst, runConservativeAnalyst, runNeutralAnalyst } from 
 import { runPortfolioManager } from "../agents/managers/portfolio-manager";
 import { LongTermMemoryManager } from "../memory/long-term";
 import { graphLogger, logAnalysisStart, logAnalysisStep, logAnalysisResult, logAnalysisError, logNodeResult } from "../utils/logger";
+import { DnseServer, API_BASE_URL } from "../tools/dnse/server";
 
-// ==================== STATE ====================
+// ==================== BUILD DATA SNAPSHOT ====================
+
+async function buildDataSnapshot(ticker: string, date: string): Promise<DataSnapshot> {
+  const server = new DnseServer(
+    process.env.DNSE_API_KEY || "",
+    process.env.DNSE_API_SECRET || ""
+  );
+
+  const safeGet = async (path: string, url: string): Promise<unknown> => {
+    try {
+      const raw = await server.getJson(path, url);
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  };
+
+  // Tính toán khoảng thời gian 90 ngày trước
+  const toDate = new Date(date);
+  const fromDate = new Date(date);
+  fromDate.setDate(fromDate.getDate() - 90);
+  const fromTs = Math.floor(fromDate.getTime() / 1000);
+  const toTs = Math.floor(toDate.getTime() / 1000);
+  const fromDateStr = fromDate.toISOString().split("T")[0];
+
+  // Fetch song song tất cả dữ liệu cần thiết
+  const [closePriceRaw, ohlcRaw, latestTradesRaw, latestQuotesRaw, foreignRaw, secDefRaw, instrumentsRaw] =
+    await Promise.all([
+      safeGet(`/price/${ticker}/close`, `${API_BASE_URL}/price/${ticker}/close`),
+      safeGet(
+        "/price/ohlc",
+        `${API_BASE_URL}/price/ohlc?symbol=${ticker}&type=STOCK&resolution=1D&from=${fromTs}&to=${toTs}`
+      ),
+      safeGet(
+        `/price/${ticker}/trades/latest`,
+        `${API_BASE_URL}/price/${ticker}/trades/latest?boardId=G1`
+      ),
+      safeGet(
+        `/price/${ticker}/quotes/latest`,
+        `${API_BASE_URL}/price/${ticker}/quotes/latest`
+      ),
+      safeGet(
+        `/price/${ticker}/foreign-trading`,
+        `${API_BASE_URL}/price/${ticker}/foreign-trading?from=${fromTs}&to=${toTs}`
+      ),
+      safeGet(`/price/${ticker}/secdef`, `${API_BASE_URL}/price/${ticker}/secdef`),
+      safeGet("/instruments", `${API_BASE_URL}/instruments?symbol=${ticker}&limit=1`),
+    ]);
+
+  // Parse giá đóng cửa — API trả về {prices: [{closePrice, boardId, ...}]}
+  const closePriceData = closePriceRaw as Record<string, unknown>;
+  const pricesArr = Array.isArray(closePriceData?.prices) ? (closePriceData.prices as Array<Record<string, unknown>>) : [];
+  // Ưu tiên boardId G1 (lô chẵn), fallback sang phần tử đầu tiên có giá > 0
+  const mainPrice = pricesArr.find((p) => p.boardId === "G1" && (p.closePrice as number) > 0)
+    || pricesArr.find((p) => (p.closePrice as number) > 0);
+  const closePrice = (mainPrice?.closePrice as number) || 0;
+
+  // Parse OHLC history — API trả về {t:[], o:[], h:[], l:[], c:[], v:[]}
+  const ohlcData = ohlcRaw as Record<string, unknown>;
+  let ohlcHistory: unknown[] = [];
+  if (Array.isArray(ohlcData?.t) && (ohlcData.t as unknown[]).length > 0) {
+    const t = ohlcData.t as number[];
+    const o = ohlcData.o as number[];
+    const h = ohlcData.h as number[];
+    const l = ohlcData.l as number[];
+    const c = ohlcData.c as number[];
+    const v = ohlcData.v as number[];
+    ohlcHistory = t.map((ts, i) => ({ t: ts, o: o[i], h: h[i], l: l[i], c: c[i], v: v[i] }));
+  } else if (Array.isArray(ohlcData?.data)) {
+    ohlcHistory = ohlcData.data as unknown[];
+  }
+
+  // Parse latest trades
+  const latestTradesData = latestTradesRaw as Record<string, unknown>;
+  const latestTrades: unknown[] = Array.isArray(latestTradesData?.data)
+    ? (latestTradesData.data as unknown[])
+    : Array.isArray(latestTradesRaw)
+    ? (latestTradesRaw as unknown[])
+    : [];
+
+  return {
+    ticker,
+    date,
+    closePrice,
+    ohlcHistory,
+    latestTrades,
+    latestQuotes: latestQuotesRaw,
+    foreignTrading: foreignRaw,
+    secDef: secDefRaw,
+    instruments: instrumentsRaw,
+    marketNews: "",
+    socialSentiment: "",
+    marketReport: "",
+    sentimentReport: "",
+    newsReport: "",
+    fundamentalsReport: "",
+  };
+}
+
+
 
 const State = Annotation.Root({
   ticker: Annotation<string>,
@@ -43,33 +143,32 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const memory = new LongTermMemoryManager();
 
   async function fetchData(s: State) {
-    // Nếu dataSnapshot đã có (vd: gọi từ CLI) thì skip
-    if (s.dataSnapshot) return {};
+    // Nếu dataSnapshot đã có dữ liệu thực (closePrice > 0 hoặc ohlcHistory có data) thì skip
+    if (s.dataSnapshot && (s.dataSnapshot.closePrice > 0 || s.dataSnapshot.ohlcHistory.length > 0)) {
+      return {};
+    }
 
     const ticker = s.ticker || "";
-    const date = s.date || new Date().toISOString().split("T")[0];
+    const date = s.date || new Date().toISOString().split("T")[0]!;
 
-    return {
-      ticker,
-      date,
-      dataSnapshot: {
+    if (!ticker) {
+      return {
         ticker,
         date,
-        closePrice: 0,
-        ohlcHistory: [],
-        latestTrades: [],
-        latestQuotes: {},
-        foreignTrading: {},
-        secDef: {},
-        instruments: {},
-        marketNews: "",
-        socialSentiment: "",
-        marketReport: "",
-        sentimentReport: "",
-        newsReport: "",
-        fundamentalsReport: "",
-      },
-    };
+        dataSnapshot: {
+          ticker, date, closePrice: 0, ohlcHistory: [], latestTrades: [],
+          latestQuotes: {}, foreignTrading: {}, secDef: {}, instruments: {},
+          marketNews: "", socialSentiment: "", marketReport: "",
+          sentimentReport: "", newsReport: "", fundamentalsReport: "",
+        },
+      };
+    }
+
+    graphLogger.nodeStart("Fetch Data", ticker);
+    const dataSnapshot = await buildDataSnapshot(ticker, date);
+    graphLogger.nodeDone("Fetch Data", 0);
+
+    return { ticker, date, dataSnapshot };
   }
 
   async function loadExperience(s: State) {
@@ -311,9 +410,7 @@ export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Pr
 
   const result = await graph.invoke({
     ticker, date,
-    dataSnapshot: { ticker, date, closePrice: 0, ohlcHistory: [], latestTrades: [], latestQuotes: {},
-      foreignTrading: {}, secDef: {}, instruments: {}, marketNews: "", socialSentiment: "",
-      marketReport: "", sentimentReport: "", newsReport: "", fundamentalsReport: "" },
+    dataSnapshot: await buildDataSnapshot(ticker, date),
     marketReport: "", sentimentReport: "", newsReport: "", fundamentalsReport: "",
     debateHistory: "", debateCount: 0,
     investmentPlan: "", traderPlan: "",
