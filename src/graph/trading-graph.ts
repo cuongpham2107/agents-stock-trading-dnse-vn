@@ -222,7 +222,15 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 // ==================== ANALYZE ====================
 
 export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Promise<string> {
-  const deepLlm = new ChatOpenAI({ temperature: 0.3 });
+  // Tạo deepLlm với cùng config với llm
+  const deepLlm = new ChatOpenAI({
+    model: process.env.DEEP_MODEL || "nvidia/deepseek-ai/deepseek-v4-pro",
+    apiKey: process.env.LLM_API_KEY,
+    temperature: 0.3,
+    configuration: {
+      baseURL: process.env.LLM_BASE_URL || "http://localhost:20128/v1",
+    },
+  });
   const graph = buildTradingGraph(llm, deepLlm);
 
   const result = await graph.invoke({
