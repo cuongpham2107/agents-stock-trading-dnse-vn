@@ -12,7 +12,7 @@ import { runTrader } from "../agents/trader/trader";
 import { runAggressiveAnalyst, runConservativeAnalyst, runNeutralAnalyst } from "../agents/risk/risk-debate";
 import { runPortfolioManager } from "../agents/managers/portfolio-manager";
 import { LongTermMemoryManager } from "../memory/long-term";
-import { graphLogger, logAnalysisStart, logAnalysisStep, logAnalysisResult, logAnalysisError } from "../utils/logger";
+import { graphLogger, logAnalysisStart, logAnalysisStep, logAnalysisResult, logAnalysisError, logNodeResult } from "../utils/logger";
 
 // ==================== STATE ====================
 
@@ -54,32 +54,40 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     const start = Date.now();
     graphLogger.nodeStart("Market Analyst", s.ticker);
     const r = await runMarketAnalyst(llm, s.dataSnapshot!);
+    const summary = r.summary || JSON.stringify(r);
+    logNodeResult("Market Analyst", summary);
     graphLogger.nodeDone("Market Analyst", Date.now() - start);
-    return { marketReport: r.summary || JSON.stringify(r) };
+    return { marketReport: summary };
   }
 
   async function sentimentAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Sentiment Analyst", s.ticker);
     const r = await runSocialAnalyst(llm, s.dataSnapshot!);
+    const summary = r.summary || JSON.stringify(r);
+    logNodeResult("Sentiment Analyst", summary);
     graphLogger.nodeDone("Sentiment Analyst", Date.now() - start);
-    return { sentimentReport: r.summary || JSON.stringify(r) };
+    return { sentimentReport: summary };
   }
 
   async function newsAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("News Analyst", s.ticker);
     const r = await runNewsAnalyst(llm, s.dataSnapshot!);
+    const summary = r.summary || JSON.stringify(r);
+    logNodeResult("News Analyst", summary);
     graphLogger.nodeDone("News Analyst", Date.now() - start);
-    return { newsReport: r.summary || JSON.stringify(r) };
+    return { newsReport: summary };
   }
 
   async function fundamentalsAnalyst(s: State) {
     const start = Date.now();
     graphLogger.nodeStart("Fundamentals Analyst", s.ticker);
     const r = await runFundamentalsAnalyst(llm, s.dataSnapshot!);
+    const summary = r.summary || JSON.stringify(r);
+    logNodeResult("Fundamentals Analyst", summary);
     graphLogger.nodeDone("Fundamentals Analyst", Date.now() - start);
-    return { fundamentalsReport: r.summary || JSON.stringify(r) };
+    return { fundamentalsReport: summary };
   }
 
   async function bullResearcher(s: State) {
@@ -90,6 +98,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
       { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
       s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
     );
+    logNodeResult("Bull Researcher", r.argument);
     graphLogger.nodeDone("Bull Researcher", Date.now() - start);
     return {
       debateHistory: (s.debateHistory || "") + "\nBull: " + r.argument,
@@ -105,6 +114,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
       { summary: s.sentimentReport || "" }, { summary: s.fundamentalsReport || "" },
       s.ticker, s.debateHistory ? s.debateHistory.split("\n") : []
     );
+    logNodeResult("Bear Researcher", r.argument);
     graphLogger.nodeDone("Bear Researcher", Date.now() - start);
     return {
       debateHistory: (s.debateHistory || "") + "\nBear: " + r.argument,
@@ -122,6 +132,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
       s.dataSnapshot!
     );
     const plan = `Rating: ${r.decision} | Confidence: ${r.confidence} | ${r.reasoning}`;
+    logNodeResult("Research Manager", plan);
     graphLogger.nodeDone("Research Manager", Date.now() - start);
     return { investmentPlan: plan };
   }
@@ -134,6 +145,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
       targetPrice: 0, stopLoss: 0, positionSize: "", timeframe: "", reasoning: s.investmentPlan
     } as any, s.dataSnapshot!);
     const plan = `${r.action} ${r.ticker} | Target: ${r.targetPrice} | SL: ${r.stopLoss}`;
+    logNodeResult("Trader", plan);
     graphLogger.nodeDone("Trader", Date.now() - start);
     return { traderPlan: plan };
   }
@@ -142,6 +154,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     const start = Date.now();
     graphLogger.nodeStart("Aggressive Risk");
     const r = await runAggressiveAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
+    logNodeResult("Aggressive Risk", r);
     graphLogger.nodeDone("Aggressive Risk", Date.now() - start);
     return { riskHistory: (s.riskHistory || "") + "\nAggressive: " + r, riskCount: s.riskCount + 1 };
   }
@@ -150,6 +163,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     const start = Date.now();
     graphLogger.nodeStart("Conservative Risk");
     const r = await runConservativeAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
+    logNodeResult("Conservative Risk", r);
     graphLogger.nodeDone("Conservative Risk", Date.now() - start);
     return { riskHistory: (s.riskHistory || "") + "\nConservative: " + r, riskCount: s.riskCount + 1 };
   }
@@ -158,6 +172,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     const start = Date.now();
     graphLogger.nodeStart("Neutral Risk");
     const r = await runNeutralAnalyst(llm, { action: "hold", ticker: s.ticker } as any, s.dataSnapshot!, { history: s.riskHistory, count: s.riskCount } as any);
+    logNodeResult("Neutral Risk", r);
     graphLogger.nodeDone("Neutral Risk", Date.now() - start);
     return { riskHistory: (s.riskHistory || "") + "\nNeutral: " + r, riskCount: s.riskCount + 1 };
   }
@@ -167,6 +182,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     graphLogger.nodeStart("Portfolio Manager");
     const r = await runPortfolioManager(deepLlm, { action: "hold", ticker: s.ticker } as any, { history: s.riskHistory } as any, s.dataSnapshot!);
     const decision = `${r.finalDecision} | ${r.action} | ${r.reasoning}`;
+    logNodeResult("Portfolio Manager", decision);
     await memory.saveEpisodicMemory(["trading", "experiences"], `${s.ticker}-${s.date}`, {
       ticker: s.ticker, date: s.date, event: "Analysis", outcome: decision, lesson: ""
     });

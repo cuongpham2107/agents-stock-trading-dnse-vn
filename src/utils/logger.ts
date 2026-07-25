@@ -155,3 +155,17 @@ export function logTable(headers: string[], rows: string[][]) {
     console.log(row.map((c, i) => (c || "").padEnd(colWidths[i] || 0)).join(" │ "));
   }
 }
+
+// ==================== RESULT LOGGER ====================
+
+export function logNodeResult(nodeName: string, result: string, maxLen: number = 150) {
+  const truncated = result.length > maxLen ? result.substring(0, maxLen) + "..." : result;
+  console.log(`  ${COLORS.gray}└─ Result: ${truncated}${COLORS.reset}`);
+}
+
+export function logNodeSummary(nodeName: string, data: Record<string, unknown>) {
+  const keys = Object.keys(data).filter(k => data[k] && data[k] !== "");
+  if (keys.length > 0) {
+    console.log(`  ${COLORS.gray}└─ Fields: ${keys.join(", ")}${COLORS.reset}`);
+  }
+}
