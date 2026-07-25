@@ -35,10 +35,10 @@ const TRADER_USER_PROMPT = `Dựa trên phân tích toàn diện từ team analy
 Hãy tận dụng các insights này để đưa ra quyết định giao dịch chiến lược và có cơ sở.
 
 OUTPUT FORMAT (JSON):
-{
+{{
   "action": "buy|sell|hold",
   "rating": "Buy|Overweight|Hold|Underweight|Sell",
-  "ticker": "${"{ticker}"}",
+  "ticker": "{ticker}",
   "confidence": 0.7,
   "targetPrice": 25.0,
   "stopLoss": 22.0,
@@ -47,7 +47,7 @@ OUTPUT FORMAT (JSON):
   "reasoning": "Lý do chi tiết dựa trên phân tích",
   "entryPoint": "Giá vào lệnh hợp lý",
   "riskRewardRatio": "Tỷ lệ risk/reward"
-}`;
+}}`;
 
 export async function runTrader(
   llm: ChatOpenAI,

@@ -61,6 +61,7 @@ class PersistentStore {
   }
 
   search(namespace: string[], query: string): StoreItem[] {
+    if (!query) return [];
     const ns = namespace.join("/");
     const items = Array.from(this.store.get(ns)?.values() || []);
     const queryLower = query.toLowerCase();

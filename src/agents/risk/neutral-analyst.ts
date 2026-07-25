@@ -19,13 +19,13 @@ GÓC NHÌN TRUNG LẬP:
 3. Khuyến nghị cân bằng
 
 OUTPUT FORMAT (JSON):
-{
+{{
   "perspective": "neutral",
   "assessment": "Đánh giá rủi ro",
   "balancedView": "Góc nhìn cân bằng",
   "keyMetrics": ["Chỉ số 1", "Chỉ số 2"],
   "recommendation": "Khuyến nghị"
-}`;
+}}`;
 
 export async function runNeutralAnalyst(
   llm: ChatOpenAI,

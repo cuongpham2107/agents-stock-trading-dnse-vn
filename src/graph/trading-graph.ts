@@ -42,7 +42,40 @@ type State = typeof State.State;
 function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const memory = new LongTermMemoryManager();
 
+  async function fetchData(s: State) {
+    // Nếu dataSnapshot đã có (vd: gọi từ CLI) thì skip
+    if (s.dataSnapshot) return {};
+
+    const ticker = s.ticker || "";
+    const date = s.date || new Date().toISOString().split("T")[0];
+
+    return {
+      ticker,
+      date,
+      dataSnapshot: {
+        ticker,
+        date,
+        closePrice: 0,
+        ohlcHistory: [],
+        latestTrades: [],
+        latestQuotes: {},
+        foreignTrading: {},
+        secDef: {},
+        instruments: {},
+        marketNews: "",
+        socialSentiment: "",
+        marketReport: "",
+        sentimentReport: "",
+        newsReport: "",
+        fundamentalsReport: "",
+      },
+    };
+  }
+
   async function loadExperience(s: State) {
+    if (!s.ticker) {
+      return { pastExperience: "" };
+    }
     const exps = memory.searchMemories(["trading", "experiences"], s.ticker);
     const past = exps.length > 0
       ? `Kinh nghiệm: ${exps.map((e: any) => `${e.date}: ${e.lesson}`).join("; ")}`
@@ -195,7 +228,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   }
 
   return {
-    loadExperience, marketAnalyst, sentimentAnalyst, newsAnalyst, fundamentalsAnalyst,
+    fetchData, loadExperience, marketAnalyst, sentimentAnalyst, newsAnalyst, fundamentalsAnalyst,
     bullResearcher, bearResearcher, researchManager, trader,
     aggressiveAnalyst, conservativeAnalyst, neutralAnalyst,
     portfolioManager, saveExperience,
@@ -209,6 +242,7 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const R = 1; // Số round debate
   return new StateGraph(State)
     // Nodes
+    .addNode("fetch", n.fetchData)
     .addNode("load", n.loadExperience)
     .addNode("market", n.marketAnalyst)
     .addNode("sentiment", n.sentimentAnalyst)
@@ -223,8 +257,9 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addNode("neutral", n.neutralAnalyst)
     .addNode("portfolio", n.portfolioManager)
     .addNode("save", n.saveExperience)
-    // Flow: 4 analysts chạy SONG SONG (fan-out từ "load")
-    .addEdge(START, "load")
+    // Flow: fetch → load → 4 analysts chạy SONG SONG (fan-out)
+    .addEdge(START, "fetch")
+    .addEdge("fetch", "load")
     .addEdge("load", "market")
     .addEdge("load", "sentiment")
     .addEdge("load", "news")

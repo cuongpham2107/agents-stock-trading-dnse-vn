@@ -19,13 +19,13 @@ GÓC NHÌN AN TOÀN:
 3. Khuyến nghị cho người thận trọng
 
 OUTPUT FORMAT (JSON):
-{
+{{
   "perspective": "safe",
   "assessment": "Đánh giá rủi ro",
   "risks": ["Rủi ro 1", "Rủi ro 2"],
   "mitigation": ["Biện pháp 1", "Biện pháp 2"],
   "recommendation": "Khuyến nghị"
-}`;
+}}`;
 
 export async function runSafeAnalyst(
   llm: ChatOpenAI,

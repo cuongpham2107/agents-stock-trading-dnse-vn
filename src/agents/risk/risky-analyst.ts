@@ -19,13 +19,13 @@ GÓC NHÌN MẠO HIỂM:
 3. Khuyến nghị cho người sẵn sàng chấp nhận rủi ro
 
 OUTPUT FORMAT (JSON):
-{
+{{
   "perspective": "risky",
   "assessment": "Đánh giá rủi ro",
   "risks": ["Rủi ro 1", "Rủi ro 2"],
   "opportunities": ["Cơ hội 1", "Cơ hội 2"],
   "recommendation": "Khuyến nghị"
-}`;
+}}`;
 
 export async function runRiskyAnalyst(
   llm: ChatOpenAI,
