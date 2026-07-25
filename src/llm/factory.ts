@@ -30,6 +30,7 @@ export function createLLM(
     case "nvidia":
     case "ollama":
     case "deepseek":
+    case "openrouter":
       return createOpenAICompatible(config, temperature, maxTokens);
 
     case "anthropic":
@@ -148,6 +149,7 @@ function getProviderConfig(provider: LLMProvider) {
     nvidia: { defaultBaseUrl: "https://integrate.api.nvidia.com/v1" },
     ollama: { defaultBaseUrl: "http://localhost:11434/v1" },
     deepseek: { defaultBaseUrl: "https://api.deepseek.com/v1" },
+    openrouter: { defaultBaseUrl: "https://openrouter.ai/api/v1" },
   };
 
   return configs[provider];
@@ -172,6 +174,11 @@ function getModelByName(name: string): ModelPreset | undefined {
     { name: "Llama 3.1 70B", provider: "nvidia", model: "meta/llama-3.1-70b-instruct", tier: "quick", description: "" },
     // DeepSeek
     { name: "DeepSeek V3", provider: "deepseek", model: "deepseek-chat", tier: "deep", description: "" },
+    // OpenRouter
+    { name: "GPT-4o (OpenRouter)", provider: "openrouter", model: "openai/gpt-4o", tier: "deep", description: "" },
+    { name: "Claude Sonnet 4 (OpenRouter)", provider: "openrouter", model: "anthropic/claude-sonnet-4", tier: "deep", description: "" },
+    { name: "Gemini 2.5 Pro (OpenRouter)", provider: "openrouter", model: "google/gemini-2.5-pro", tier: "deep", description: "" },
+    { name: "Llama 3.1 70B (OpenRouter)", provider: "openrouter", model: "meta-llama/llama-3.1-70b-instruct", tier: "quick", description: "" },
   ];
 
   return allModels.find((m) => m.name.toLowerCase() === name.toLowerCase());

@@ -1,6 +1,6 @@
 // ==================== LLM PROVIDER TYPES ====================
 
-export type LLMProvider = "openai" | "anthropic" | "google" | "nvidia" | "ollama" | "deepseek";
+export type LLMProvider = "openai" | "anthropic" | "google" | "nvidia" | "ollama" | "deepseek" | "openrouter";
 
 export interface LLMConfig {
   provider: LLMProvider;
@@ -86,6 +86,16 @@ export const PROVIDER_CONFIGS: Record<LLMProvider, {
     models: [
       { name: "DeepSeek V3", provider: "deepseek", model: "deepseek-chat", tier: "deep", description: "Mạnh, chi phí thấp" },
       { name: "DeepSeek Coder", provider: "deepseek", model: "deepseek-coder", tier: "quick", description: "Code-focused" },
+    ],
+  },
+  openrouter: {
+    name: "OpenRouter",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    models: [
+      { name: "GPT-4o (OpenRouter)", provider: "openrouter", model: "openai/gpt-4o", tier: "deep", description: "GPT-4o qua OpenRouter" },
+      { name: "Claude Sonnet 4 (OpenRouter)", provider: "openrouter", model: "anthropic/claude-sonnet-4", tier: "deep", description: "Claude qua OpenRouter" },
+      { name: "Gemini 2.5 Pro (OpenRouter)", provider: "openrouter", model: "google/gemini-2.5-pro", tier: "deep", description: "Gemini qua OpenRouter" },
+      { name: "Llama 3.1 70B (OpenRouter)", provider: "openrouter", model: "meta-llama/llama-3.1-70b-instruct", tier: "quick", description: "Llama qua OpenRouter" },
     ],
   },
 };
