@@ -83,7 +83,13 @@ Tìm thảo luận từ stockbiz.vn, diễn đàn:
 Hãy tổng hợp và đưa ra báo cáo chi tiết với bảng Markdown tóm tắt ở cuối.`;
 
 function getSevenDaysBack(date: string): string {
-  const d = new Date(date);
+  const d = date ? new Date(date) : new Date();
+  if (isNaN(d.getTime())) {
+    // fallback về 7 ngày trước từ hôm nay
+    const fallback = new Date();
+    fallback.setDate(fallback.getDate() - 7);
+    return fallback.toISOString().split("T")[0] ?? "";
+  }
   d.setDate(d.getDate() - 7);
   return d.toISOString().split("T")[0] || date;
 }

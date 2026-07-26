@@ -11,13 +11,29 @@ import type { DataSnapshot, TraderOutput, RiskDebateState } from "../../types";
 
 // ==================== RISK SUBGRAPH ====================
 
+/** Guard: đảm bảo riskDebateState luôn khởi tạo đủ field */
+function resolveRiskState(raw: unknown) {
+  const d = (raw ?? {}) as Record<string, unknown>;
+  return {
+    history: typeof d.history === "string" ? d.history : "",
+    aggressiveHistory: typeof d.aggressiveHistory === "string" ? d.aggressiveHistory : "",
+    conservativeHistory: typeof d.conservativeHistory === "string" ? d.conservativeHistory : "",
+    neutralHistory: typeof d.neutralHistory === "string" ? d.neutralHistory : "",
+    latestSpeaker: (d.latestSpeaker === "Aggressive" || d.latestSpeaker === "Conservative" || d.latestSpeaker === "Neutral" ? d.latestSpeaker : null) as "Aggressive" | "Conservative" | "Neutral" | null,
+    currentAggressiveResponse: typeof d.currentAggressiveResponse === "string" ? d.currentAggressiveResponse : "",
+    currentConservativeResponse: typeof d.currentConservativeResponse === "string" ? d.currentConservativeResponse : "",
+    currentNeutralResponse: typeof d.currentNeutralResponse === "string" ? d.currentNeutralResponse : "",
+    count: typeof d.count === "number" ? d.count : 0,
+  };
+}
+
 export function createRiskSubgraph(llm: ChatOpenAI, deepLlm: ChatOpenAI, maxRounds: number = 2) {
   // Node: Aggressive Analyst
   async function aggressiveAnalyst(state: RiskState): Promise<Partial<RiskState>> {
     console.log("[Risk] Đang chạy Aggressive Risk Analyst...");
 
     const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
+    const riskState = resolveRiskState(state.riskDebateState);
     const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}") as TraderOutput;
 
     const response = await runAggressiveAnalyst(llm, traderDecision, snapshot, riskState);
@@ -40,7 +56,7 @@ export function createRiskSubgraph(llm: ChatOpenAI, deepLlm: ChatOpenAI, maxRoun
     console.log("[Risk] Đang chạy Conservative Risk Analyst...");
 
     const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
+    const riskState = resolveRiskState(state.riskDebateState);
     const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}") as TraderOutput;
 
     const response = await runConservativeAnalyst(llm, traderDecision, snapshot, riskState);
@@ -63,7 +79,7 @@ export function createRiskSubgraph(llm: ChatOpenAI, deepLlm: ChatOpenAI, maxRoun
     console.log("[Risk] Đang chạy Neutral Risk Analyst...");
 
     const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
+    const riskState = resolveRiskState(state.riskDebateState);
     const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}") as TraderOutput;
 
     const response = await runNeutralAnalyst(llm, traderDecision, snapshot, riskState);
@@ -86,7 +102,7 @@ export function createRiskSubgraph(llm: ChatOpenAI, deepLlm: ChatOpenAI, maxRoun
     console.log("[Risk] Đang chạy Portfolio Manager...");
 
     const snapshot = state.dataSnapshot!;
-    const riskState = state.riskDebateState;
+    const riskState = resolveRiskState(state.riskDebateState);
     const traderDecision = JSON.parse(state.traderInvestmentPlan || "{}") as TraderOutput;
 
     const decision = await runPortfolioManager(
@@ -112,7 +128,7 @@ export function createRiskSubgraph(llm: ChatOpenAI, deepLlm: ChatOpenAI, maxRoun
 
   // Conditional edge: Continue risk analysis or end
   function shouldContinueRiskAnalysis(state: RiskState): string {
-    const riskState = state.riskDebateState;
+    const riskState = resolveRiskState(state.riskDebateState);
     if (riskState.count >= maxRounds * 3) {
       return "Portfolio Manager";
     }

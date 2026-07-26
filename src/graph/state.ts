@@ -26,14 +26,33 @@ export const TradingStateAnnotation = Annotation.Root({
     currentResponse: string;
     judgeDecision: string;
     count: number;
-  }>,
+  }>({
+    value: (_, right) => right,
+    default: () => ({
+      history: "", bullHistory: "", bearHistory: "",
+      currentResponse: "", judgeDecision: "", count: 0,
+    }),
+  }),
   investmentPlan: Annotation<string>,
 
   // Trader output
   traderInvestmentPlan: Annotation<string>,
 
   // Risk debate state
-  riskDebateState: Annotation<RiskDebateState>,
+  riskDebateState: Annotation<RiskDebateState>({
+    value: (_, right) => right,
+    default: () => ({
+      history: "",
+      aggressiveHistory: "",
+      conservativeHistory: "",
+      neutralHistory: "",
+      latestSpeaker: null,
+      currentAggressiveResponse: "",
+      currentConservativeResponse: "",
+      currentNeutralResponse: "",
+      count: 0,
+    }),
+  }),
 
   // Final output
   finalTradeDecision: Annotation<string>,
@@ -78,7 +97,13 @@ export const DebateStateAnnotation = Annotation.Root({
     currentResponse: string;
     judgeDecision: string;
     count: number;
-  }>,
+  }>({
+    value: (_, right) => right,
+    default: () => ({
+      history: "", bullHistory: "", bearHistory: "",
+      currentResponse: "", judgeDecision: "", count: 0,
+    }),
+  }),
   investmentPlan: Annotation<string>,
   messages: Annotation<unknown[]>,
 });
@@ -92,7 +117,20 @@ export const RiskStateAnnotation = Annotation.Root({
   date: Annotation<string>,
   dataSnapshot: Annotation<DataSnapshot | null>,
   traderInvestmentPlan: Annotation<string>,
-  riskDebateState: Annotation<RiskDebateState>,
+  riskDebateState: Annotation<RiskDebateState>({
+    value: (_, right) => right,
+    default: () => ({
+      history: "",
+      aggressiveHistory: "",
+      conservativeHistory: "",
+      neutralHistory: "",
+      latestSpeaker: null,
+      currentAggressiveResponse: "",
+      currentConservativeResponse: "",
+      currentNeutralResponse: "",
+      count: 0,
+    }),
+  }),
   finalTradeDecision: Annotation<string>,
   messages: Annotation<unknown[]>,
 });

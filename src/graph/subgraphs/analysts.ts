@@ -18,7 +18,6 @@ export function createAnalystsSubgraph(llm: ChatOpenAI) {
 
     return {
       marketReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
@@ -31,7 +30,6 @@ export function createAnalystsSubgraph(llm: ChatOpenAI) {
 
     return {
       sentimentReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
@@ -44,7 +42,6 @@ export function createAnalystsSubgraph(llm: ChatOpenAI) {
 
     return {
       newsReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
   }
 
@@ -57,13 +54,7 @@ export function createAnalystsSubgraph(llm: ChatOpenAI) {
 
     return {
       fundamentalsReport: result.summary || JSON.stringify(result),
-      messages: [{ role: "assistant", content: result.summary || JSON.stringify(result) }],
     };
-  }
-
-  // Node: Clear Messages
-  async function clearMessages(state: AnalystsState): Promise<Partial<AnalystsState>> {
-    return { messages: [] };
   }
 
   // Build subgraph — 4 analysts chạy SONG SONG, fan-in vào END
@@ -72,19 +63,16 @@ export function createAnalystsSubgraph(llm: ChatOpenAI) {
     .addNode("Sentiment Analyst", sentimentAnalyst)
     .addNode("News Analyst", newsAnalyst)
     .addNode("Fundamentals Analyst", fundamentalsAnalyst)
-    .addNode("Clear Messages", clearMessages)
 
-    // fan-out từ START
+    // fan-out từ START, fan-in trực tiếp vào END
     .addEdge(START, "Market Analyst")
     .addEdge(START, "Sentiment Analyst")
     .addEdge(START, "News Analyst")
     .addEdge(START, "Fundamentals Analyst")
-    // fan-in → Clear Messages → END
-    .addEdge("Market Analyst", "Clear Messages")
-    .addEdge("Sentiment Analyst", "Clear Messages")
-    .addEdge("News Analyst", "Clear Messages")
-    .addEdge("Fundamentals Analyst", "Clear Messages")
-    .addEdge("Clear Messages", END);
+    .addEdge("Market Analyst", END)
+    .addEdge("Sentiment Analyst", END)
+    .addEdge("News Analyst", END)
+    .addEdge("Fundamentals Analyst", END);
 
   return workflow.compile();
 }
