@@ -1,136 +1,86 @@
-import { interrupt } from "@langchain/langgraph";
+import * as readline from "readline";
+import type { TradingState } from "./state";
 
-// ==================== INTERRUPT CONFIG ====================
+// ==================== INTERRUPT POINTS ====================
+// LangGraph interrupt hoạt động theo cơ chế:
+//   1. compile({ interruptBefore: ["manager", "risk"] }) — graph dừng TRưỚC node đó
+//   2. graph.stream(input, { configurable: { thread_id } }) — chạy đến interrupt
+//   3. User xem state, confirm/cancel
+//   4. graph.stream(null, { configurable: { thread_id } }) — resume từ checkpoint
 
-export interface InterruptConfig {
-  enabled: boolean;
-  nodes: string[];
-}
+export const INTERRUPT_NODES = ["manager", "risk"] as const;
+export type InterruptNode = (typeof INTERRUPT_NODES)[number];
 
-const DEFAULT_INTERRUPT_CONFIG: InterruptConfig = {
-  enabled: true,
-  nodes: ["Research Manager", "Portfolio Manager"],
-};
-
-// ==================== INTERRUPT FUNCTIONS ====================
+// ==================== DISPLAY HELPERS ====================
 
 /**
- * Interrupt trước khi chạy node
+ * Hiển thị tóm tắt state tại điểm interrupt
  */
-export function interruptBeforeNode(
-  nodeName: string,
-  state: Record<string, unknown>,
-  config: InterruptConfig = DEFAULT_INTERRUPT_CONFIG
+export function displayInterruptSummary(
+  node: InterruptNode,
+  state: Partial<TradingState>
 ): void {
-  if (!config.enabled || !config.nodes.includes(nodeName)) {
-    return;
-  }
+  const divider = "=".repeat(60);
 
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`[INTERRUPT] Dừng trước node: ${nodeName}`);
-  console.log(`${"=".repeat(60)}`);
+  console.log(`\n${divider}`);
 
-  // Interrupt và chờ user input
-  const userInput = interrupt({
-    message: `Bạn có muốn tiếp tục phân tích không?`,
-    currentNode: nodeName,
-    stateSnapshot: {
-      ticker: state.ticker,
-      date: state.date,
-    },
-  });
+  if (node === "manager") {
+    console.log(`[INTERRUPT] ⏸  Trước Research Manager`);
+    console.log(divider);
+    console.log(`📊 Mã: ${state.ticker} | Ngày: ${state.date}`);
+    console.log(`\n📝 Kết quả debate (${state.investmentDebateState?.count ?? 0} rounds):`);
 
-  if (userInput === "cancel") {
-    throw new Error("User cancelled analysis");
-  }
+    const history = state.investmentDebateState?.history ?? "";
+    // Hiển thị 4 dòng cuối của debate để không spam terminal
+    const lastLines = history.split("\n").filter(Boolean).slice(-4);
+    lastLines.forEach((l) => console.log(`  ${l}`));
+  } else if (node === "risk") {
+    console.log(`[INTERRUPT] ⏸  Trước Risk Team / Portfolio Manager`);
+    console.log(divider);
+    console.log(`📊 Mã: ${state.ticker} | Ngày: ${state.date}`);
+    console.log(`\n💼 Kế hoạch từ Trader:`);
 
-  console.log(`[INTERRUPT] Người dùng xác nhận tiếp tục`);
-}
-
-/**
- * Tạo interrupt point cho Research Manager
- */
-export function researchManagerInterrupt(state: {
-  investmentDebateState: {
-    history: string;
-    count: number;
-  };
-}): void {
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`[INTERRUPT] Research Manager`);
-  console.log(`Số vòng tranh luận: ${state.investmentDebateState.count}`);
-  console.log(`${"=".repeat(60)}`);
-
-  const userInput = interrupt({
-    message: `Đã hoàn thành ${state.investmentDebateState.count} rounds debate. Tiếp tục?`,
-    debateHistory: state.investmentDebateState.history,
-  });
-
-  if (userInput === "cancel") {
-    throw new Error("User cancelled after debate");
-  }
-}
-
-/**
- * Tạo interrupt point cho Portfolio Manager
- */
-export function portfolioManagerInterrupt(state: {
-  traderInvestmentPlan: string;
-  riskDebateState: {
-    history: string;
-    count: number;
-  };
-}): void {
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`[INTERRUPT] Portfolio Manager`);
-  console.log(`${"=".repeat(60)}`);
-
-  const userInput = interrupt({
-    message: `Trading proposal: ${state.traderInvestmentPlan.substring(0, 200)}... Xác nhận quyết định cuối cùng?`,
-    riskHistory: state.riskDebateState.history,
-  });
-
-  if (userInput === "cancel") {
-    throw new Error("User cancelled final decision");
-  }
-}
-
-// ==================== INTERRUPT HANDLER ====================
-
-export class InterruptHandler {
-  private config: InterruptConfig;
-  private interrupts: Array<{
-    node: string;
-    timestamp: number;
-    resolved: boolean;
-  }> = [];
-
-  constructor(config: Partial<InterruptConfig> = {}) {
-    this.config = { ...DEFAULT_INTERRUPT_CONFIG, ...config };
-  }
-
-  shouldInterrupt(nodeName: string): boolean {
-    return this.config.enabled && this.config.nodes.includes(nodeName);
-  }
-
-  recordInterrupt(nodeName: string): void {
-    this.interrupts.push({
-      node: nodeName,
-      timestamp: Date.now(),
-      resolved: false,
-    });
-  }
-
-  resolveInterrupt(nodeName: string): void {
-    const interrupt = this.interrupts.find(
-      (i) => i.node === nodeName && !i.resolved
-    );
-    if (interrupt) {
-      interrupt.resolved = true;
+    try {
+      const plan = JSON.parse(state.traderInvestmentPlan ?? "{}");
+      console.log(`  Action: ${plan.action?.toUpperCase() ?? "N/A"}`);
+      console.log(`  Target: ${plan.targetPrice ?? "N/A"} | Stop Loss: ${plan.stopLoss ?? "N/A"}`);
+      console.log(`  Confidence: ${((plan.confidence ?? 0) * 100).toFixed(0)}%`);
+      console.log(`  Lý do: ${(plan.reasoning ?? "").substring(0, 120)}...`);
+    } catch {
+      console.log(`  ${(state.traderInvestmentPlan ?? "").substring(0, 200)}`);
     }
   }
 
-  getPendingInterrupts() {
-    return this.interrupts.filter((i) => !i.resolved);
-  }
+  console.log(divider);
+}
+
+// ==================== USER CONFIRMATION ====================
+
+/**
+ * Hỏi user có muốn tiếp tục không (dùng readline).
+ * Returns true = tiếp tục, false = huỷ.
+ */
+export async function askUserConfirm(
+  node: InterruptNode,
+  rl: readline.Interface
+): Promise<boolean> {
+  const label =
+    node === "manager"
+      ? "Research Manager tổng hợp debate"
+      : "Risk Team + Portfolio Manager ra quyết định cuối";
+
+  return new Promise((resolve) => {
+    rl.question(
+      `\n▶  Tiếp tục chạy ${label}? [Enter = OK / c = Huỷ] `,
+      (answer) => {
+        const cancel = answer.trim().toLowerCase() === "c";
+        if (cancel) {
+          console.log("[INTERRUPT] Đã huỷ phân tích.\n");
+        } else {
+          console.log("[INTERRUPT] Tiếp tục...\n");
+        }
+        resolve(!cancel);
+      }
+    );
+  });
 }

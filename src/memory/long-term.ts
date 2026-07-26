@@ -1,8 +1,7 @@
 import { DynamicTool } from "@langchain/core/tools";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import prisma from "../db/prisma";
 
-// ==================== PERSISTENT STORE (SQLite-like) ====================
+// ==================== PERSISTENT STORE (Prisma-based) ====================
 
 interface StoreItem {
   key: string;
@@ -11,99 +10,94 @@ interface StoreItem {
 }
 
 class PersistentStore {
-  private store: Map<string, Map<string, StoreItem>> = new Map();
-  private persistPath: string;
+  private namespace: string;
 
-  constructor(dataDir: string = ".memory") {
-    this.persistPath = join(dataDir, "long-term-memory.json");
-    if (!existsSync(dataDir)) {
-      mkdirSync(dataDir, { recursive: true });
-    }
-    this.load();
+  constructor(namespace: string = "default") {
+    this.namespace = namespace;
   }
 
-  private load(): void {
-    if (existsSync(this.persistPath)) {
-      try {
-        const data = JSON.parse(readFileSync(this.persistPath, "utf-8"));
-        // JSON.parse trả về plain object, phải convert cả 2 tầng về Map
-        this.store = new Map(
-          Object.entries(data).map(([ns, items]) => [
-            ns,
-            new Map(Object.entries(items as Record<string, StoreItem>)),
-          ])
-        );
-      } catch (error) {
-        console.error("[Memory] Lỗi khi tải dữ liệu:", error);
-      }
-    }
-  }
-
-  private save(): void {
-    try {
-      // Convert Map → plain object để JSON.stringify được
-      const data: Record<string, Record<string, StoreItem>> = {};
-      for (const [ns, items] of this.store.entries()) {
-        data[ns] = Object.fromEntries(items.entries());
-      }
-      writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
-    } catch (error) {
-      console.error("[Memory] Lỗi khi lưu dữ liệu:", error);
-    }
-  }
-
-  put(namespace: string[], key: string, value: unknown): void {
-    const ns = namespace.join("/");
-    if (!this.store.has(ns)) {
-      this.store.set(ns, new Map());
-    }
-    this.store.get(ns)!.set(key, {
-      key,
-      value,
-      timestamp: Date.now(),
+  async put(key: string, value: unknown): Promise<void> {
+    const existing = await prisma.memory.findUnique({
+      where: { namespace_key: { namespace: this.namespace, key } },
     });
-    this.save();
+
+    if (existing) {
+      await prisma.memory.update({
+        where: { id: existing.id },
+        data: { value: JSON.stringify(value), updatedAt: new Date() },
+      });
+    } else {
+      await prisma.memory.create({
+        data: {
+          namespace: this.namespace,
+          key,
+          value: JSON.stringify(value),
+        },
+      });
+    }
   }
 
-  get(namespace: string[], key: string): StoreItem | undefined {
-    const ns = namespace.join("/");
-    return this.store.get(ns)?.get(key);
+  async get(key: string): Promise<StoreItem | undefined> {
+    const record = await prisma.memory.findUnique({
+      where: { namespace_key: { namespace: this.namespace, key } },
+    });
+
+    if (!record) return undefined;
+
+    return {
+      key: record.key,
+      value: JSON.parse(record.value),
+      timestamp: record.updatedAt.getTime(),
+    };
   }
 
-  search(namespace: string[], query: string): StoreItem[] {
+  async search(query: string): Promise<StoreItem[]> {
     if (!query) return [];
-    const ns = namespace.join("/");
-    const items = Array.from(this.store.get(ns)?.values() || []);
-    const queryLower = query.toLowerCase();
 
-    return items.filter((item) => {
-      const valueStr = JSON.stringify(item.value).toLowerCase();
-      return valueStr.includes(queryLower);
+    const records = await prisma.memory.findMany({
+      where: {
+        namespace: this.namespace,
+        value: { contains: query },
+      },
     });
+
+    return records.map((r) => ({
+      key: r.key,
+      value: JSON.parse(r.value),
+      timestamp: r.updatedAt.getTime(),
+    }));
   }
 
-  list(namespace: string[]): StoreItem[] {
-    const ns = namespace.join("/");
-    return Array.from(this.store.get(ns)?.values() || []);
+  async list(): Promise<StoreItem[]> {
+    const records = await prisma.memory.findMany({
+      where: { namespace: this.namespace },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return records.map((r) => ({
+      key: r.key,
+      value: JSON.parse(r.value),
+      timestamp: r.updatedAt.getTime(),
+    }));
   }
 
-  delete(namespace: string[], key: string): boolean {
-    const ns = namespace.join("/");
-    const deleted = this.store.get(ns)?.delete(key) || false;
-    if (deleted) this.save();
-    return deleted;
+  async delete(key: string): Promise<boolean> {
+    const deleted = await prisma.memory.delete({
+      where: { namespace_key: { namespace: this.namespace, key } },
+    });
+    return !!deleted;
   }
 }
 
 // ==================== GLOBAL STORE ====================
 
-let globalStore: PersistentStore | null = null;
+const stores = new Map<string, PersistentStore>();
 
-export function getLongTermStore(): PersistentStore {
-  if (!globalStore) {
-    globalStore = new PersistentStore(".memory");
+export function getLongTermStore(namespace: string = "default"): PersistentStore {
+  if (!stores.has(namespace)) {
+    stores.set(namespace, new PersistentStore(namespace));
   }
-  return globalStore;
+  return stores.get(namespace)!;
 }
 
 // ==================== MEMORY TYPES ====================
@@ -139,16 +133,15 @@ export interface ProceduralMemory {
 export class LongTermMemoryManager {
   private store: PersistentStore;
 
-  constructor() {
-    this.store = getLongTermStore();
+  constructor(namespace: string = "default") {
+    this.store = getLongTermStore(namespace);
   }
 
   async saveSemanticMemory(
-    namespace: string[],
     key: string,
     memory: Omit<SemanticMemory, "type" | "timestamp">
   ): Promise<void> {
-    this.store.put(namespace, key, {
+    await this.store.put(key, {
       type: "semantic",
       ...memory,
       timestamp: Date.now(),
@@ -156,11 +149,10 @@ export class LongTermMemoryManager {
   }
 
   async saveEpisodicMemory(
-    namespace: string[],
     key: string,
     memory: Omit<EpisodicMemory, "type" | "timestamp">
   ): Promise<void> {
-    this.store.put(namespace, key, {
+    await this.store.put(key, {
       type: "episodic",
       ...memory,
       timestamp: Date.now(),
@@ -168,56 +160,55 @@ export class LongTermMemoryManager {
   }
 
   async saveProceduralMemory(
-    namespace: string[],
     key: string,
     memory: Omit<ProceduralMemory, "type" | "lastUsed">
   ): Promise<void> {
-    this.store.put(namespace, key, {
+    await this.store.put(key, {
       type: "procedural",
       ...memory,
       lastUsed: Date.now(),
     });
   }
 
-  searchMemories(namespace: string[], query: string): unknown[] {
-    return this.store.search(namespace, query).map((item) => item.value);
+  async searchMemories(query: string): Promise<unknown[]> {
+    const results = await this.store.search(query);
+    return results.map((item) => item.value);
   }
 
-  getMemory(namespace: string[], key: string): unknown | null {
-    const item = this.store.get(namespace, key);
+  async getMemory(key: string): Promise<unknown | null> {
+    const item = await this.store.get(key);
     return item?.value || null;
   }
 
-  deleteMemory(namespace: string[], key: string): void {
-    this.store.delete(namespace, key);
+  async deleteMemory(key: string): Promise<void> {
+    await this.store.delete(key);
   }
 
-  listMemories(namespace: string[]): unknown[] {
-    return this.store.list(namespace).map((item) => item.value);
+  async listMemories(): Promise<unknown[]> {
+    const results = await this.store.list();
+    return results.map((item) => item.value);
   }
 }
 
 // ==================== MEMORY TOOLS ====================
 
 export function createMemoryTools(): DynamicTool[] {
-  const manager = new LongTermMemoryManager();
+  const tradingManager = new LongTermMemoryManager("trading/experiences");
+  const marketManager = new LongTermMemoryManager("market/knowledge");
+  const procedureManager = new LongTermMemoryManager("trading/procedures");
 
   const saveTradingExperience = new DynamicTool({
     name: "save_trading_experience",
     description: "Lưu kinh nghiệm giao dịch vào bộ nhớ lâu dài. Input: JSON với ticker, date, event, outcome, lesson.",
     func: async (input: string) => {
       const data = JSON.parse(input);
-      await manager.saveEpisodicMemory(
-        ["trading", "experiences"],
-        `${data.ticker}-${data.date}`,
-        {
-          ticker: data.ticker,
-          date: data.date,
-          event: data.event,
-          outcome: data.outcome,
-          lesson: data.lesson,
-        }
-      );
+      await tradingManager.saveEpisodicMemory(`${data.ticker}-${data.date}`, {
+        ticker: data.ticker,
+        date: data.date,
+        event: data.event,
+        outcome: data.outcome,
+        lesson: data.lesson,
+      });
       return `Đã lưu kinh nghiệm giao dịch ${data.ticker} ngày ${data.date}`;
     },
   });
@@ -226,7 +217,7 @@ export function createMemoryTools(): DynamicTool[] {
     name: "search_trading_experiences",
     description: "Tìm kiếm kinh nghiệm giao dịch đã lưu. Input: query string.",
     func: async (query: string) => {
-      const results = manager.searchMemories(["trading", "experiences"], query);
+      const results = await tradingManager.searchMemories(query);
       if (results.length === 0) return "Không tìm thấy kinh nghiệm nào.";
       return JSON.stringify(results, null, 2);
     },
@@ -237,7 +228,7 @@ export function createMemoryTools(): DynamicTool[] {
     description: "Lưu kiến thức về thị trường. Input: JSON với content, source, confidence.",
     func: async (input: string) => {
       const data = JSON.parse(input);
-      await manager.saveSemanticMemory(["market", "knowledge"], `knowledge-${Date.now()}`, {
+      await marketManager.saveSemanticMemory(`knowledge-${Date.now()}`, {
         content: data.content,
         source: data.source,
         confidence: data.confidence || 0.8,
@@ -250,7 +241,7 @@ export function createMemoryTools(): DynamicTool[] {
     name: "search_market_knowledge",
     description: "Tìm kiếm kiến thức thị trường đã lưu. Input: query string.",
     func: async (query: string) => {
-      const results = manager.searchMemories(["market", "knowledge"], query);
+      const results = await marketManager.searchMemories(query);
       if (results.length === 0) return "Không tìm thấy kiến thức nào.";
       return JSON.stringify(results, null, 2);
     },
@@ -261,7 +252,7 @@ export function createMemoryTools(): DynamicTool[] {
     description: "Lưu quy trình giao dịch. Input: JSON với task, steps.",
     func: async (input: string) => {
       const data = JSON.parse(input);
-      await manager.saveProceduralMemory(["trading", "procedures"], `procedure-${data.task}`, {
+      await procedureManager.saveProceduralMemory(`procedure-${data.task}`, {
         task: data.task,
         steps: data.steps,
         successRate: 1.0,
@@ -274,7 +265,7 @@ export function createMemoryTools(): DynamicTool[] {
     name: "get_trading_history",
     description: "Lấy lịch sử giao dịch của một mã. Input: ticker string.",
     func: async (ticker: string) => {
-      const results = manager.searchMemories(["trading", "experiences"], ticker);
+      const results = await tradingManager.searchMemories(ticker);
       if (results.length === 0) return `Không có lịch sử giao dịch cho ${ticker}.`;
       return JSON.stringify(results, null, 2);
     },
@@ -284,7 +275,7 @@ export function createMemoryTools(): DynamicTool[] {
     name: "get_all_lessons",
     description: "Lấy tất cả bài học từ kinh nghiệm giao dịch. Không cần input.",
     func: async () => {
-      const results = manager.listMemories(["trading", "experiences"]);
+      const results = await tradingManager.listMemories();
       const lessons = results
         .filter((r: any) => r.lesson)
         .map((r: any) => `- ${r.ticker} (${r.date}): ${r.lesson}`);

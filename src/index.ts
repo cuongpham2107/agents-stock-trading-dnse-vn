@@ -6,7 +6,11 @@ import { analyze } from "./graph/trading-graph";
 import { SYSTEM_PROMPT } from "./prompts";
 import { LLMManager, getAllModels, getModelsByProvider, type LLMProvider } from "./llm/index";
 import { createAllTools } from "./tools/index";
-import { MemoryManager } from "./memory/index";
+import { PaperPortfolioTracker } from "./portfolio/tracker";
+import { createBot, setupErrorHandler, createWhitelistMiddleware } from "./telegram/bot";
+import { setupHandlers } from "./telegram/handlers";
+import { startCronJobs } from "./scheduler/cron";
+import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import * as readline from "readline";
 
 // ==================== CONFIG ====================
@@ -18,7 +22,49 @@ const llmManager = new LLMManager({
   deepApiKey: process.env.LLM_API_KEY || process.env.NVIDIA_API_KEY,
 });
 
-const memoryManager = new MemoryManager(".memory");
+const portfolioTracker = new PaperPortfolioTracker();
+
+// Checkpointer dùng chung cho toàn bộ session
+// Lưu tại .data/checkpoints.db (cùng thư mục với SQLite paper trading)
+let checkpointer: SqliteSaver | null = null;
+
+async function getCheckpointer(): Promise<SqliteSaver> {
+  if (!checkpointer) {
+    checkpointer = await SqliteSaver.fromConnString("file:.data/checkpoints.db");
+  }
+  return checkpointer;
+}
+
+// ==================== TELEGRAM BOT ====================
+
+async function startTelegramBot(llm: ChatOpenAI): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.log("[Telegram] TELEGRAM_BOT_TOKEN không được set — bỏ qua khởi động bot");
+    return;
+  }
+
+  const allowedIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const bot = createBot(token);
+  setupErrorHandler(bot);
+  bot.use(createWhitelistMiddleware(allowedIds));
+  setupHandlers(bot, llm);
+
+  // Khởi động cron jobs
+  startCronJobs(llm, bot, allowedIds);
+
+  // Bắt đầu polling (không block — chạy nền)
+  bot.start({
+    onStart: (info) => console.log(`[Telegram] Bot @${info.username} đang chạy (polling)`),
+    drop_pending_updates: true,
+  });
+
+  console.log("[Telegram] Bot đã khởi động");
+}
 
 // ==================== MAIN ====================
 
@@ -32,6 +78,10 @@ async function main() {
   console.log(`\n[LLM] Quick model: ${currentModels.quick}`);
   console.log(`[LLM] Deep model: ${currentModels.deep}`);
 
+  // Khởi động Telegram bot nếu có token
+  const llm = llmManager.getQuickLLM() as ChatOpenAI;
+  await startTelegramBot(llm);
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -42,6 +92,9 @@ async function main() {
   console.log("");
   console.log("LỆNH:");
   console.log("  analyze <ticker>           - Phân tích mã chứng khoán");
+  console.log("  buy <ticker> <qty> <price>  - Ghi nhận mua giả định (paper trading)");
+  console.log("  close <positionId> <price> - Đóng vị thế giả định");
+  console.log("  portfolio                  - Xem danh sách vị thế");
   console.log("  switch <model>             - Switch quick model");
   console.log("  switch-deep <model>        - Switch deep model");
   console.log("  models                     - Liệt kê models có sẵn");
@@ -70,6 +123,60 @@ async function main() {
 
     const parts = userInput.trim().split(/\s+/);
     const command = parts[0]?.toLowerCase();
+
+    // /buy HPG 1000 26.8
+    if (command === "buy" && parts.length >= 4) {
+      const ticker = parts[1]?.toUpperCase() ?? "";
+      const quantity = parseFloat(parts[2] ?? "0");
+      const avgCost = parseFloat(parts[3] ?? "0");
+
+      if (isNaN(quantity) || isNaN(avgCost)) {
+        console.log("\n[Lỗi] Số lượng và giá phải là số\n");
+        continue;
+      }
+
+      const note = parts.slice(4).join(" ") || undefined;
+      const result = await portfolioTracker.openPosition({ ticker, quantity, avgCost, note });
+      console.log(`\n${result.message}\n`);
+      continue;
+    }
+
+    // /close <positionId> <price>
+    if (command === "close" && parts.length >= 3) {
+      const positionId = parts[1] ?? "";
+      const closePrice = parseFloat(parts[2] ?? "0");
+
+      if (isNaN(closePrice)) {
+        console.log("\n[Lỗi] Giá phải là số\n");
+        continue;
+      }
+
+      const result = await portfolioTracker.closePosition({ positionId, closePrice });
+      console.log(`\n${result.message}\n`);
+      continue;
+    }
+
+    // /portfolio - xem tất cả vị thế
+    if (command === "portfolio") {
+      const positions = await portfolioTracker.getAllPositions();
+      
+      if (positions.length === 0) {
+        console.log("\nChưa có vị thế nào.\n");
+        continue;
+      }
+
+      console.log("\n=== DANH SÁCH VỊ THẾ ===\n");
+      for (const pos of positions) {
+        const status = pos.status === "open" ? "🟢 MỞ" : "🔴 ĐÓNG";
+        const pnl = pos.realizedPnl !== null ? `${pos.realizedPnl.toLocaleString("vi-VN")}đ` : "---";
+        
+        console.log(`${pos.ticker} | ${pos.quantity} cổ | Giá: ${pos.avgCost.toLocaleString("vi-VN")}đ | ${status} | P&L: ${pnl}`);
+        console.log(`  ID: ${pos.id.slice(0, 8)} | Ngày mở: ${pos.openDate}`);
+        if (pos.note) console.log(`  Ghi chú: ${pos.note}`);
+        console.log("");
+      }
+      continue;
+    }
 
     if (command === "switch" && parts[1]) {
       const modelName = parts.slice(1).join(" ");
@@ -131,17 +238,22 @@ async function main() {
       continue;
     }
 
-    const analyzeMatch = userInput.match(/^analyze\s+(\w+)$/i);
+    const analyzeMatch = userInput.trim().match(/^analyze\s+(\w+)$/i);
     if (analyzeMatch && analyzeMatch[1]) {
       const ticker = analyzeMatch[1].toUpperCase();
-      const date = new Date().toISOString().split("T")[0] || new Date().toISOString();
+      const date = new Date().toISOString().split("T")[0] ?? new Date().toISOString();
 
       console.log(`\n[Bắt đầu phân tích ${ticker}...]`);
-      console.log("[Quy trình: Data → 4 Analysts → Bull/Bear Debate → Research Manager → Trader → Risk Team → Portfolio Manager]");
+      console.log("[Quy trình: Data → 4 Analysts → Bull/Bear Debate ⏸ Research Manager → Trader ⏸ Risk Team → Portfolio Manager]");
+      console.log("[⏸ = điểm dừng để bạn xác nhận trước khi tiếp tục]\n");
 
       try {
         const llm = llmManager.getQuickLLM();
-        const result = await analyze(llm as ChatOpenAI, ticker, date);
+        const cp = await getCheckpointer();
+        const result = await analyze(llm as ChatOpenAI, ticker, date, {
+          checkpointer: cp,
+          rl,
+        });
 
         console.log("\n" + "=".repeat(60));
         console.log("KẾT QUẢ PHÂN TÍCH");

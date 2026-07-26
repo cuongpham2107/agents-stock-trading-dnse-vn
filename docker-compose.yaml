@@ -1,5 +1,8 @@
 name: dnse
 
+# NOTE: DNSE agent chạy local với `bun run start`
+# SQLite database sẽ được tạo tại .data/dnse.db
+
 services:
   # Firecrawl Self-hosted
   firecrawl-api:

@@ -10,6 +10,9 @@ import { TradingStateAnnotation, type TradingState } from "./state";
 import { createAnalystsSubgraph } from "./subgraphs/analysts";
 import { createDebateSubgraph } from "./subgraphs/debate";
 import { createRiskSubgraph } from "./subgraphs/risk";
+import { INTERRUPT_NODES, displayInterruptSummary, askUserConfirm } from "./interrupts";
+import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import * as readline from "readline";
 
 // ==================== BUILD DATA SNAPSHOT ====================
 
@@ -135,7 +138,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   async function loadExperience(s: TradingState): Promise<Partial<TradingState>> {
     if (!s.ticker) return {};
     try {
-      const exps = memory.searchMemories(["trading", "experiences"], s.ticker);
+      const exps = await memory.searchMemories(s.ticker);
       // Inject past experience vào dataSnapshot.marketNews để analysts có thể tham khảo
       if (exps.length > 0 && s.dataSnapshot) {
         const pastSummary = exps
@@ -211,7 +214,7 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   async function saveExperience(s: TradingState): Promise<Partial<TradingState>> {
     if (!s.ticker || !s.finalTradeDecision) return {};
     try {
-      await memory.saveEpisodicMemory(["trading", "experiences"], `${s.ticker}-${s.date}`, {
+      await memory.saveEpisodicMemory(`${s.ticker}-${s.date}`, {
         ticker: s.ticker,
         date: s.date,
         event: "Analysis",
@@ -229,7 +232,11 @@ function createNodes(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
 
 // ==================== BUILD GRAPH ====================
 
-export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
+export function buildTradingGraph(
+  llm: ChatOpenAI,
+  deepLlm: ChatOpenAI,
+  checkpointer?: SqliteSaver
+) {
   const n = createNodes(llm, deepLlm);
 
   // Khởi tạo 3 subgraphs
@@ -237,15 +244,15 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
   const debateSubgraph = createDebateSubgraph(llm, 2);
   const riskSubgraph = createRiskSubgraph(llm, deepLlm, 1);
 
-  return new StateGraph(TradingStateAnnotation)
+  const graph = new StateGraph(TradingStateAnnotation)
     // Nodes
     .addNode("fetch", n.fetchData)
     .addNode("load", n.loadExperience)
     .addNode("analysts", analystsSubgraph)   // subgraph: 4 analysts song song
     .addNode("debate", debateSubgraph)        // subgraph: bull/bear debate loop
-    .addNode("manager", n.researchManager)
+    .addNode("manager", n.researchManager)   // ← interrupt point 1
     .addNode("trader", n.trader)
-    .addNode("risk", riskSubgraph)            // subgraph: aggressive/conservative/neutral → portfolio
+    .addNode("risk", riskSubgraph)            // ← interrupt point 2: subgraph: aggressive/conservative/neutral → portfolio
     .addNode("save", n.saveExperience)
     // Edges
     .addEdge(START, "fetch")
@@ -256,13 +263,29 @@ export function buildTradingGraph(llm: ChatOpenAI, deepLlm: ChatOpenAI) {
     .addEdge("manager", "trader")
     .addEdge("trader", "risk")
     .addEdge("risk", "save")
-    .addEdge("save", END)
-    .compile();
+    .addEdge("save", END);
+
+  return graph.compile({
+    checkpointer,
+    // Dừng TRƯỚC "manager" (sau debate) và TRƯỚC "risk" (sau trader)
+    // để user xem trung gian và quyết định tiếp tục hay huỷ
+    interruptBefore: [...INTERRUPT_NODES],
+  });
 }
 
 // ==================== ANALYZE ====================
 
-export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Promise<string> {
+export async function analyze(
+  llm: ChatOpenAI,
+  ticker: string,
+  date: string,
+  options: {
+    checkpointer?: SqliteSaver;
+    rl?: readline.Interface;
+    /** Tắt interrupt (dùng khi gọi từ LangGraph Studio hoặc test) */
+    noInterrupt?: boolean;
+  } = {}
+): Promise<string> {
   logAnalysisStart(ticker);
 
   const deepLlm = new ChatOpenAI({
@@ -272,7 +295,14 @@ export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Pr
     configuration: { baseURL: process.env.LLM_BASE_URL || "http://localhost:20128/v1" },
   });
 
-  const graph = buildTradingGraph(llm, deepLlm);
+  // Mỗi lần analyze là 1 thread riêng — dùng ticker+date làm thread_id
+  // để checkpointer lưu state và có thể resume sau interrupt
+  const threadId = `${ticker.toLowerCase()}-${date}`;
+  const config = { configurable: { thread_id: threadId } };
+
+  // Nếu có checkpointer → dùng interrupt; không có → chạy thẳng
+  const useInterrupt = !options.noInterrupt && !!options.checkpointer;
+  const graph = buildTradingGraph(llm, deepLlm, useInterrupt ? options.checkpointer : undefined);
 
   logAnalysisStep(1, 6, "Fetch & Load Experience");
   logAnalysisStep(2, 6, "4 Analysts (Market, Sentiment, News, Fundamentals) — song song");
@@ -280,9 +310,9 @@ export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Pr
   logAnalysisStep(4, 6, "Research Manager → Trader");
   logAnalysisStep(5, 6, "Risk Team (Aggressive, Conservative, Neutral)");
   logAnalysisStep(6, 6, "Portfolio Manager → Save");
-  console.log("\n");
+  console.log("");
 
-  const result = await graph.invoke({
+  const initialInput = {
     ticker,
     date,
     dataSnapshot: await buildDataSnapshot(ticker, date),
@@ -298,7 +328,61 @@ export async function analyze(llm: ChatOpenAI, ticker: string, date: string): Pr
     error: null,
     retryCount: 0,
     messages: [],
-  });
+  };
 
-  return result.finalTradeDecision || "Không có kết quả";
+  // Không có interrupt → invoke thẳng, nhanh hơn
+  if (!useInterrupt) {
+    const result = await graph.invoke(initialInput, config);
+    return result.finalTradeDecision || "Không có kết quả";
+  }
+
+  // ---- Chạy với interrupt ----
+  // Vòng lặp: stream → gặp interrupt → user confirm → stream(null) resume
+  // Input chỉ truyền lần đầu; các lần resume truyền null để tiếp tục từ checkpoint
+  let currentInput: typeof initialInput | null = initialInput;
+  let finalDecision = "";
+
+  while (true) {
+    // Stream từ checkpoint (hoặc từ đầu nếu lần đầu)
+    const stream = await graph.stream(currentInput, {
+      ...config,
+      streamMode: "values",
+    });
+
+    let lastState: Partial<TradingState> = {};
+
+    for await (const chunk of stream) {
+      lastState = chunk as Partial<TradingState>;
+    }
+
+    // Kiểm tra graph đã chạy xong chưa hay đang bị interrupt
+    const graphState = await graph.getState(config);
+    const nextNodes = graphState.next as string[];
+
+    if (!nextNodes || nextNodes.length === 0) {
+      // Graph đã xong
+      finalDecision = (lastState as TradingState).finalTradeDecision || "Không có kết quả";
+      break;
+    }
+
+    // Graph đang dừng tại interrupt — nextNodes[0] là node sắp chạy
+    const pausedAt = nextNodes[0] as "manager" | "risk";
+    displayInterruptSummary(pausedAt, lastState as Partial<TradingState>);
+
+    if (options.rl) {
+      const confirmed = await askUserConfirm(pausedAt, options.rl);
+      if (!confirmed) {
+        finalDecision = "Phân tích đã bị huỷ bởi người dùng.";
+        break;
+      }
+    } else {
+      // Không có readline (headless/test) → tự động tiếp tục
+      console.log(`[INTERRUPT] Auto-continue tại ${pausedAt} (không có readline)\n`);
+    }
+
+    // Resume: truyền null để graph tiếp tục từ checkpoint
+    currentInput = null;
+  }
+
+  return finalDecision;
 }

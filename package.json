@@ -13,6 +13,7 @@
     "@langchain/langgraph-cli": "^1.4.3",
     "@types/bun": "latest",
     "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
     "typescript": "^7.0.2"
   },
   "dependencies": {
@@ -24,8 +25,12 @@
     "@langchain/openai": "^1.5.5",
     "@langchain/tavily": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@prisma/client": "5",
     "dotenv": "^17.4.2",
     "firecrawl": "^4.30.1",
+    "grammy": "^1.45.1",
+    "node-cron": "^4.6.0",
+    "prisma": "5",
     "zod": "^4.4.3"
   }
 }

@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// NOTE: Khi chuyển sang PostgreSQL, chỉ cần đổi provider và DATABASE_URL
+
+// ==================== LONG-TERM MEMORY ====================
+
+model Memory {
+  id        String @id @default(cuid())
+  namespace String
+  key       String
+  value     String // JSON string
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([namespace, key])
+  @@index([namespace])
+  @@map("memories")
+}
+
+// ==================== WATCHLIST ====================
+
+model Watchlist {
+  id        String   @id @default(cuid())
+  ticker    String   @unique
+  addedAt   DateTime @default(now())
+  note      String?
+
+  @@map("watchlist")
+}
+
+// ==================== PAPER TRADING ====================
+
+model PaperPosition {
+  id           String   @id @default(cuid())
+  ticker       String
+  quantity     Float
+  avgCost      Float
+  openDate     String   // YYYY-MM-DD
+  status       String   @default("open") // "open" | "closed"
+  closeDate    String?
+  closedPrice  Float?
+  realizedPnl  Float?
+  note         String?  // lý do mở (vd: "trading-graph khuyến nghị MUA")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reviews      DailyReview[]
+
+  @@index([ticker])
+  @@index([status])
+  @@map("paper_positions")
+}
+
+model DailyReview {
+  id             String        @id @default(cuid())
+  position       PaperPosition @relation(fields: [positionId], references: [id])
+  positionId     String
+  ticker         String
+  date           String        // YYYY-MM-DD
+  currentPrice   Float
+  pnl            Float         // tuyệt đối
+  pnlPct         Float         // phần trăm
+  recommendation String        // HOLD | BUY_MORE | PARTIAL_SELL | FULL_SELL
+  reasoning      String?
+  createdAt      DateTime      @default(now())
+
+  @@unique([positionId, date])
+  @@index([positionId])
+  @@index([date])
+  @@map("daily_reviews")
+}

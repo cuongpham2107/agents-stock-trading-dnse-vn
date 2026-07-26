@@ -118,101 +118,198 @@ src/scheduler/
 
 ---
 
-## 3. Portfolio Tracker Graph
+## 3. Portfolio Tracker (Paper Trading)
 
-### Mục tiêu
-- Ghi nhận vị thế thực tế (mua ngày nào, giá bao nhiêu, số lượng bao nhiêu)
-- Mỗi ngày **tự động** đánh giá lại: nên giữ, mua thêm, hay bán
-- Tính toán P&L theo thời gian thực
-- Chỉ báo Telegram khi **trạng thái thay đổi** so với hôm trước
+### Khái niệm — Paper Trading
+Toàn bộ giao dịch là **giả định** (paper trading), không kết nối với lệnh thật ở sàn DNSE. Mục đích là:
+- Ghi nhận quyết định "nếu tôi mua hôm nay" để theo dõi hiệu quả
+- Hàng ngày cập nhật giá thị trường, tính lãi/lỗ so với giá vốn giả định
+- Đánh giá lại: với vị thế đang giả định giữ, hôm nay nên làm gì tiếp
 
-### Vòng đời một vị thế
+### Luồng sử dụng điển hình
 
 ```
-Mở vị thế (/buy HPG 1000 20.8)
-    ↓
-Theo dõi tự động hàng ngày
-  - Cron 15:30 chạy portfolio-review-graph cho vị thế này
-  - Nếu kết quả khác hôm qua (HOLD→SELL hoặc HOLD→BUY_MORE): gửi Telegram
-  - Nếu kết quả giống hôm qua (HOLD→HOLD): im lặng, không spam
-    ↓
-Đóng vị thế (một trong hai cách):
-  a) Graph ra FULL_SELL → gửi Telegram khuyến nghị → user xác nhận bằng /close HPG
-  b) User tự tay bán ở sàn và gõ /close HPG để cập nhật hệ thống
-    ↓
-Vị thế status = "closed" → cron bỏ qua → dừng theo dõi
+26/07: trading-graph phân tích HPG → khuyến nghị MUA
+  → User gõ /buy HPG 1000 20.8 (giả định mua 1000 cổ giá 20.8)
+  → Hệ thống ghi nhận: paper_trade mở, giá vốn 20.8
+
+27/07 15:30 (cron tự động):
+  → Fetch giá HPG hôm nay = 21.2
+  → Tính P&L: +400k (+1.9%)
+  → Cập nhật bản ghi ngày 27/07: currentPrice=21.2, pnl=+400k
+  → portfolio-review-graph đánh giá: HOLD (xu hướng tốt, giữ)
+  → Telegram: "HPG: +1.9% | Khuyến nghị: HOLD"
+
+28/07 15:30:
+  → Giá HPG = 19.5
+  → P&L: -1300k (-6.25%)
+  → portfolio-review-graph: FULL_SELL (giá giảm mạnh, cắt lỗ)
+  → Telegram: "⚠️ HPG: -6.25% | Khuyến nghị: CẮT LỖ"
+  → User quyết định: /close HPG để đóng vị thế
 ```
 
-**Quy tắc rõ ràng:**
-- Graph **không tự thực hiện giao dịch thật** — chỉ ra khuyến nghị
-- Người dùng quyết định tay sau khi nhận báo cáo
-- `/close HPG` hoặc `/sell HPG` phải được gõ thủ công để đóng vị thế
-
-### Dữ liệu vị thế
+### Dữ liệu
 
 ```typescript
-interface Position {
+// Vị thế giả định đang mở
+interface PaperPosition {
+  id: string
   ticker: string
-  quantity: number         // số cổ phiếu đang giữ
-  avgCost: number          // giá vốn bình quân
-  buyDate: string          // ngày mở vị thế
+  quantity: number          // số cổ giả định
+  avgCost: number           // giá vốn giả định
+  openDate: string          // ngày giả định mua
   status: "open" | "closed"
-  lastReviewDate: string   // ngày review cuối
-  lastReviewResult: "HOLD" | "BUY_MORE" | "PARTIAL_SELL" | "FULL_SELL"
-  lastUpdated: string
+  closeDate?: string
+  closedPrice?: number
+  realizedPnl?: number      // lãi/lỗ khi đóng
+  note?: string             // lý do mở vị thế (vd: "trading-graph khuyến nghị MUA")
+}
+
+// Snapshot P&L theo ngày (lịch sử)
+interface DailyReview {
+  id: string
+  positionId: string
+  date: string
+  currentPrice: number
+  pnl: number               // tuyệt đối (VND)
+  pnlPct: number            // phần trăm
+  recommendation: "HOLD" | "BUY_MORE" | "PARTIAL_SELL" | "FULL_SELL"
+  reasoning: string
 }
 ```
 
-### Quy tắc đánh giá lại
+### Quy tắc
 
 | Điều kiện | Hành động |
 |---|---|
-| Mua hôm nay, cùng ngày | **Không review** — chưa có đủ dữ liệu biến động |
-| Từ ngày hôm sau trở đi | Bắt đầu chu kỳ review hàng ngày lúc 15:30 |
-| Kết quả = kết quả hôm qua | Im lặng, không gửi Telegram |
-| Kết quả khác hôm qua | Gửi Telegram ngay |
-| Status = "closed" | Bỏ qua hoàn toàn |
+| Mua hôm nay, cùng ngày | Ghi nhận ngay, **không review** — chưa có biến động |
+| Từ ngày hôm sau trở đi | Review tự động lúc 15:30 mỗi ngày |
+| P&L thay đổi > 3% so với hôm qua | Luôn gửi Telegram dù recommendation giống |
+| Recommendation đổi trạng thái | Luôn gửi Telegram |
+| Recommendation giống hôm qua, P&L bình thường | Im lặng |
+| Status = "closed" | Bỏ qua trong cron |
 
-### `portfolio-review-graph` — thiết kế
+### `portfolio-review-graph`
 
 ```
-load_position
+load_position (lấy PaperPosition + DailyReview hôm qua)
     ↓
-fetch_data (dữ liệu thị trường hôm nay)
+fetch_data (giá thị trường hôm nay từ DNSE API)
     ↓
 [market_analyst, news_analyst] (song song — tái dùng analysts subgraph)
     ↓
 position_evaluator
-  Input: vị thế (giá vốn, số lượng, ngày mua) + dữ liệu thị trường hôm nay
-  So sánh: giá hiện tại vs giá vốn, P&L%, xu hướng, news sentiment
-  Output: HOLD | BUY_MORE | PARTIAL_SELL | FULL_SELL + lý do + mức giá đề xuất
+  Context: "Đang giả định giữ {qty} cổ {ticker}, giá vốn {avgCost},
+            giá hôm nay {currentPrice}, P&L hiện tại {pnlPct}%"
+  Output: HOLD | BUY_MORE | PARTIAL_SELL | FULL_SELL + reasoning
     ↓
-compare_with_yesterday
-  Nếu giống hôm qua → flag "no_change" → không gửi Telegram
-  Nếu khác → flag "changed" → gửi Telegram
+save_daily_review (ghi DailyReview vào DB)
     ↓
-save_review_result (cập nhật lastReviewDate, lastReviewResult trong Position)
+check_alert (so sánh vs hôm qua → quyết định có gửi Telegram không)
 ```
-
-**Khác biệt với trading-graph:**
-
-`trading-graph` hỏi: *"Có nên vào lệnh không?"*
-
-`portfolio-review-graph` hỏi: *"Tôi đang giữ 1000 cổ HPG giá vốn 20.8 (đang lãi/lỗ X%), với tình hình hôm nay tôi nên làm gì?"* — prompt phải bao gồm thông tin vị thế cụ thể.
 
 ### Files cần tạo
 
 ```
 src/portfolio/
-  tracker.ts                    — CRUD vị thế (lưu vào .memory/portfolio/)
+  tracker.ts                    — CRUD PaperPosition và DailyReview
   portfolio-review-graph.ts     — graph đánh giá vị thế
   agents/
-    position-evaluator.ts       — agent so sánh vị thế vs thị trường
+    position-evaluator.ts       — agent đánh giá với context vị thế cụ thể
 ```
 
 ---
 
-## 4. Alert thông minh (tích hợp vào Phase 2, không để đến Phase 4)
+## 5. Storage — SQLite thay vì JSON
+
+### Tại sao chuyển sang SQLite
+
+| | JSON file hiện tại | SQLite |
+|---|---|---|
+| Query theo ticker/date | Scan toàn bộ file | Index, WHERE clause |
+| Lịch sử P&L theo ngày | Khó | `SELECT * FROM daily_reviews WHERE ticker='HPG'` |
+| Concurrent access | Không an toàn | WAL mode, transaction |
+| Backup | Copy file | Copy file (cũng là 1 file) |
+| Setup | Không cần gì | Không cần Docker service |
+
+**Quyết định: SQLite** — dùng `bun:sqlite` (built-in, không cần thêm package). Không dùng PostgreSQL vì không cần multi-user concurrent writes.
+
+### Schema
+
+```sql
+-- Bộ nhớ dài hạn (thay thế long-term-memory.json)
+CREATE TABLE memories (
+  id TEXT PRIMARY KEY,
+  namespace TEXT NOT NULL,        -- "trading/experiences", "market/knowledge"
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,            -- JSON string
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(namespace, key)
+);
+CREATE INDEX idx_memories_namespace ON memories(namespace);
+
+-- Vị thế paper trading
+CREATE TABLE paper_positions (
+  id TEXT PRIMARY KEY,
+  ticker TEXT NOT NULL,
+  quantity REAL NOT NULL,
+  avg_cost REAL NOT NULL,
+  open_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'closed'
+  close_date TEXT,
+  closed_price REAL,
+  realized_pnl REAL,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_positions_ticker ON paper_positions(ticker);
+CREATE INDEX idx_positions_status ON paper_positions(status);
+
+-- Lịch sử review hàng ngày
+CREATE TABLE daily_reviews (
+  id TEXT PRIMARY KEY,
+  position_id TEXT NOT NULL REFERENCES paper_positions(id),
+  ticker TEXT NOT NULL,
+  date TEXT NOT NULL,
+  current_price REAL NOT NULL,
+  pnl REAL NOT NULL,
+  pnl_pct REAL NOT NULL,
+  recommendation TEXT NOT NULL,   -- HOLD | BUY_MORE | PARTIAL_SELL | FULL_SELL
+  reasoning TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(position_id, date)
+);
+CREATE INDEX idx_reviews_position ON daily_reviews(position_id);
+CREATE INDEX idx_reviews_date ON daily_reviews(date);
+```
+
+### Files cần tạo
+
+```
+src/db/
+  database.ts     — singleton SQLite connection, khởi tạo schema
+  schema.ts       — CREATE TABLE statements
+  migrations.ts   — migrate từ JSON sang SQLite (chạy 1 lần)
+```
+
+### DB path
+
+```env
+DB_PATH=.data/dnse.db   # mặc định, có thể override qua .env
+```
+
+### Docker volume
+
+SQLite chỉ là 1 file — mount vào volume để persist khi container restart:
+
+```yaml
+volumes:
+  - ./.data:/app/.data
+```
+
+
 
 Với kịch bản theo dõi vị thế hàng ngày, alert thông minh cần được xây dựng **cùng lúc** với portfolio-review-graph, không phải sau:
 
