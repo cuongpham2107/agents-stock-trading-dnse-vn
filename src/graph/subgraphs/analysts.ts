@@ -66,23 +66,25 @@ export function createAnalystsSubgraph(llm: ChatOpenAI) {
     return { messages: [] };
   }
 
-  // Build subgraph
+  // Build subgraph — 4 analysts chạy SONG SONG, fan-in vào END
   const workflow = new StateGraph(AnalystsStateAnnotation)
     .addNode("Market Analyst", marketAnalyst)
-    .addNode("Clear Messages", clearMessages)
     .addNode("Sentiment Analyst", sentimentAnalyst)
     .addNode("News Analyst", newsAnalyst)
     .addNode("Fundamentals Analyst", fundamentalsAnalyst)
+    .addNode("Clear Messages", clearMessages)
 
-    // Sequential flow
+    // fan-out từ START
     .addEdge(START, "Market Analyst")
+    .addEdge(START, "Sentiment Analyst")
+    .addEdge(START, "News Analyst")
+    .addEdge(START, "Fundamentals Analyst")
+    // fan-in → Clear Messages → END
     .addEdge("Market Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "Sentiment Analyst")
     .addEdge("Sentiment Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "News Analyst")
     .addEdge("News Analyst", "Clear Messages")
-    .addEdge("Clear Messages", "Fundamentals Analyst")
-    .addEdge("Fundamentals Analyst", END);
+    .addEdge("Fundamentals Analyst", "Clear Messages")
+    .addEdge("Clear Messages", END);
 
   return workflow.compile();
 }
